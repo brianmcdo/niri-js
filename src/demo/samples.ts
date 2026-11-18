@@ -32,6 +32,10 @@ export function samplePanes(): PaneDefinition[] {
   ];
 }
 
+function keycaps(parts: readonly string[]): string {
+  return `<span class="guide-keys">${parts.map((part) => `<kbd>${part}</kbd>`).join("")}</span>`;
+}
+
 function pane(
   paneId: string,
   title: string,
@@ -66,8 +70,8 @@ function guideHtml(): string {
     ["historyBack", "Return to the pane you came from"],
   ];
   const items = [
-    `<dt>${apple ? "⌥" : "Alt"}+arrows</dt><dd>Move to the neighboring cell, including an empty one. H J K L work too.</dd>`,
-    ...rows.map(([action, description]) => `<dt>${shortcutLabel(action, apple)}</dt><dd>${description}</dd>`),
+    `<dt>${keycaps([apple ? "⌥" : "Alt", "←", "↑", "↓", "→"])}</dt><dd>Move to the neighboring cell, including an empty one. ${keycaps(["H", "J", "K", "L"])} work too.</dd>`,
+    ...rows.map(([action, description]) => `<dt>${keycaps(shortcutLabel(action, apple).split("+"))}</dt><dd>${description}</dd>`),
   ].join("");
   return `<article class="guide">
     <p class="guide-kicker">niri-js</p>

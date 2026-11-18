@@ -17,4 +17,6 @@ test("the sample strip includes html, a custom element, react, vue, and svelte",
   const guide = panes[0];
   if (guide?.source.kind !== "html") throw new Error("guide is html");
   expect(guide.source.html).toContain("mount(host, context)");
+  expect(guide.source.html).toContain("<kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd>");
+  expect(guide.source.html).toContain('<span class="guide-keys"><kbd>H</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></span>');
 });
