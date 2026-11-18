@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { createLayout } from "./layout.ts";
+import { createLayout } from "../layout/layout.ts";
 import { exportDocument, normalizeSession, parseLayoutFile, pushClosed, workspaceIdFor } from "./session.ts";
-import type { PaneDefinition } from "./types.ts";
+import type { PaneDefinition } from "../types.ts";
 
 function pane(id: string): PaneDefinition {
   return { paneId: id, title: id, surfaceKind: "html", source: { kind: "html", html: `<p>${id}</p>` } };

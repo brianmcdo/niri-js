@@ -1,4 +1,4 @@
-import type { PaneContext, PaneFramework, PaneHandle, PaneMount, PaneSource } from "./types.ts";
+import type { PaneContext, PaneFramework, PaneHandle, PaneMount, PaneSource } from "../types.ts";
 
 const nativeImport = new Function("specifier", "return import(specifier)") as (
   specifier: string,

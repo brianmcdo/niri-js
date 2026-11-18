@@ -1,4 +1,4 @@
-import { mountPane } from "./host.ts";
+import { mountPane } from "../host/host.ts";
 import {
   cameraFor,
   closePane as closeInLayout,
@@ -25,9 +25,9 @@ import {
   splitBlank,
   splitPlane,
   toggleMaximized,
-} from "./layout.ts";
-import type { SeedColumn } from "./layout.ts";
-import { assertLayout } from "./layout.ts";
+} from "../layout/layout.ts";
+import type { SeedColumn } from "../layout/layout.ts";
+import { assertLayout } from "../layout/layout.ts";
 import { matchShortcut, shortcutLabel, type ShortcutAction } from "./shortcuts.ts";
 import { searchPalette, type PaletteHit } from "./spotlight.ts";
 import { PaneBus } from "./bus.ts";
@@ -52,8 +52,8 @@ import {
   ungroupPane,
   withGroups,
   type PaneGroup,
-} from "./groups.ts";
-import type { Box, Cursor, Layout, PaneBusEvent, PaneContext, PaneDefinition, PaneHandle, PaneSource, Scene } from "./types.ts";
+} from "../layout/groups.ts";
+import type { Box, Cursor, Layout, PaneBusEvent, PaneContext, PaneDefinition, PaneHandle, PaneSource, Scene } from "../types.ts";
 
 export interface TapeWorkspaceOptions {
   workspaceId?: string;

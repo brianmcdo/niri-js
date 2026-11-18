@@ -32,7 +32,7 @@ for await (const file of declarations.scan({ cwd: "dist" })) {
 
 const js = await Bun.file("dist/index.js").text();
 const entryTypes = await Bun.file("dist/index.d.ts").text();
-if (!entryTypes.includes('from "./workspace.js"')) {
+if (!entryTypes.includes('from "./workspace/workspace.js"')) {
   throw new Error("dist/index.d.ts does not point at the workspace declaration.");
 }
 if (!js.includes('from "react"') && !js.includes('import("react")')) {

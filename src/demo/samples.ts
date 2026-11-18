@@ -1,7 +1,7 @@
-import { shortcutLabel, type ShortcutAction } from "./shortcuts.ts";
-import type { PaneDefinition } from "./types.ts";
-import type { SeedColumn } from "./layout.ts";
-import type { PaneGroup } from "./groups.ts";
+import { shortcutLabel, type ShortcutAction } from "../workspace/shortcuts.ts";
+import type { PaneDefinition } from "../types.ts";
+import type { SeedColumn } from "../layout/layout.ts";
+import type { PaneGroup } from "../layout/groups.ts";
 
 const apple =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);

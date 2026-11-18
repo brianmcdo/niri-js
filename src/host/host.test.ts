@@ -3,7 +3,7 @@ import { h, nextTick } from "vue";
 import { beforeAll, expect, test } from "bun:test";
 import { compile } from "svelte/compiler";
 import { mountPane, resolveModuleUrl } from "./host.ts";
-import type { PaneContext } from "./types.ts";
+import type { PaneContext } from "../types.ts";
 
 function context(overrides: Partial<PaneContext> = {}): PaneContext {
   return {
@@ -225,7 +225,7 @@ beforeAll(async () => {
     <p class="svelte-pane">{title}:{focused}</p>`,
     { filename: "SveltePane.svelte", generate: "client", css: "injected" },
   );
-  const file = new URL("../.tape-cache/svelte-pane-fixture.js", import.meta.url);
+  const file = new URL("../../.tape-cache/svelte-pane-fixture.js", import.meta.url);
   await Bun.write(file, result.js.code);
   SveltePane = (await import(file.href)).default;
 });

@@ -1,5 +1,5 @@
-import { closePane as closeInLayout, assertLayout } from "./layout.ts";
-import type { Cursor, Layout, PaneDefinition, PaneSource } from "./types.ts";
+import { closePane as closeInLayout, assertLayout } from "../layout/layout.ts";
+import type { Cursor, Layout, PaneDefinition, PaneSource } from "../types.ts";
 
 export const SESSION_SCHEMA = 2 as const;
 

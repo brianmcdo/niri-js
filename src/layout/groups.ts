@@ -1,4 +1,4 @@
-import type { Layout } from "./types.ts";
+import type { Layout } from "../types.ts";
 
 export interface PaneGroup {
   id: string;

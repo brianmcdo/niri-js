@@ -1,4 +1,4 @@
-import { TapeWorkspace } from "./workspace.ts";
+import { TapeWorkspace } from "../workspace/workspace.ts";
 import { sampleColumns, sampleGroups, samplePanes } from "./samples.ts";
 
 const root = document.querySelector("#app");

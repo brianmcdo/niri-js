@@ -1,8 +1,8 @@
 import { resolve, sep } from "node:path";
 import { frameworkPlugins } from "./framework-plugins.ts";
-import type { PaneFramework } from "./types.ts";
+import type { PaneFramework } from "../types.ts";
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dir, "../..");
 const cache = new Map<string, { mtimeMs: number; code: string }>();
 
 const extensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".vue", ".svelte"]);

@@ -7,8 +7,8 @@ import type {
   Plane,
   Scene,
   Viewport,
-} from "./types.ts";
-import { LAYOUT_SCHEMA } from "./types.ts";
+} from "../types.ts";
+import { LAYOUT_SCHEMA } from "../types.ts";
 import { forgetPane, normalizeGroups } from "./groups.ts";
 
 export interface MeasureOptions {

@@ -1,5 +1,5 @@
 import homepage from "./index.html";
-import { compilePaneRequest } from "./src/compile.ts";
+import { compilePaneRequest } from "./src/demo/compile.ts";
 
 const server = Bun.serve({
   routes: {

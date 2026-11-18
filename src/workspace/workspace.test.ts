@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { TapeWorkspace } from "./workspace.ts";
-import type { PaneDefinition } from "./types.ts";
+import type { PaneDefinition } from "../types.ts";
 
 const proto = HTMLElement.prototype;
 const ownWidth = Object.getOwnPropertyDescriptor(proto, "clientWidth");

@@ -1,7 +1,7 @@
-export { TapeWorkspace } from "./workspace.ts";
-export type { TapeWorkspaceOptions } from "./workspace.ts";
-export type { SeedColumn } from "./layout.ts";
-export type { PaneGroup } from "./groups.ts";
+export { TapeWorkspace } from "./workspace/workspace.ts";
+export type { TapeWorkspaceOptions } from "./workspace/workspace.ts";
+export type { SeedColumn } from "./layout/layout.ts";
+export type { PaneGroup } from "./layout/groups.ts";
 export type {
   Box,
   Cursor,

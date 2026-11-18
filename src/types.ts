@@ -1,5 +1,5 @@
 /** A pane the workspace can mount. `mount` sources stay in memory and are not saved. */
-import type { PaneGroup } from "./groups.ts";
+import type { PaneGroup } from "./layout/groups.ts";
 
 export type PaneSource =
   | { kind: "html"; html: string }

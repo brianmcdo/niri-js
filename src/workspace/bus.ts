@@ -1,4 +1,4 @@
-import type { PaneBusEvent } from "./types.ts";
+import type { PaneBusEvent } from "../types.ts";
 
 type Listener = (event: PaneBusEvent) => void;
 
