@@ -2,16 +2,65 @@
 
 A native scrolling workspace, in the spirit of [Onirigiri](https://github.com/riteofstring/onirigiri) and [niri](https://github.com/niri-wm/niri). Panes sit in columns on a horizontal strip. Opening one adds a column instead of shrinking the others. The camera scrolls to the focused pane, and overview zooms out to the whole strip.
 
-The workspace is plain TypeScript. A pane can be HTML, a custom element, a React component, a Vue single-file component, or a Svelte component.
+The workspace is plain TypeScript. A pane can be HTML, a custom element, a React component, a Vue component, or a Svelte component.
 
-## Run
+## Install
+
+```bash
+bun add niri-js
+```
+
+```ts
+import { TapeWorkspace } from "niri-js";
+import "niri-js/styles.css";
+
+const root = document.querySelector("#app");
+if (!(root instanceof HTMLElement)) throw new Error("Missing #app.");
+
+const workspace = new TapeWorkspace(root, {
+  storageKey: "niri-js",
+  panes: [
+    {
+      paneId: "notes",
+      title: "Notes",
+      surfaceKind: "html",
+      source: { kind: "html", html: "<p>Hello</p>" },
+    },
+  ],
+});
+```
+
+Give the container a height. `.tape` fills it. Create the workspace in the browser, after the container is on the page, and call `workspace.destroy()` when the page goes away.
+
+React, Vue, and Svelte are optional. Install the one a pane mounts:
+
+```ts
+workspace.openPane({
+  paneId: "chart",
+  title: "Chart",
+  surfaceKind: "react",
+  source: { kind: "react", component: Chart },
+});
+```
+
+These sources work too:
+
+- `{ kind: "html", html }`
+- `{ kind: "element", tag: "my-widget" }`
+- `{ kind: "vue" | "svelte", component }`
+- `{ kind: "mount", mount }`
+- `{ kind: "module", url }` when that URL's module exports `mount(host, context)`
+
+## Run the demo
 
 ```bash
 bun install
 bun dev
 ```
 
-Then open the URL Bun prints. `bun test` checks the layout engine and that each kind of pane compiles.
+Then open the URL Bun prints. `bun test` checks the layout engine and that each kind of pane compiles. `bun run build` writes the package to `dist/`.
+
+This demo compiles a project file, such as `panes/ledger.tsx`, through `GET /_tape/compile`. That route belongs to the demo server. The published package mounts a component or a module URL.
 
 ## Shortcuts
 
@@ -41,19 +90,6 @@ Drag a title bar to drop a pane on another cell. Drag the right edge to resize a
 
 ## Load a pane
 
-Use **New pane**, or call `openPane` with a source:
-
-```ts
-workspace.openPane({
-  paneId: "chart",
-  title: "Chart",
-  surfaceKind: "react",
-  source: { kind: "module", url: "panes/ledger.tsx", framework: "react" },
-});
-```
-
-`framework` is `react`, `vue`, `svelte`, `element`, or `auto` (chosen from the file extension). Project files are compiled by `GET /_tape/compile`. A remote module must export `mount(host, context)`.
-
 ```ts
 export function mount(host, context) {
   const node = document.createElement("p");
@@ -65,11 +101,4 @@ export function mount(host, context) {
 
 `context` includes `focused`, `visible`, `maximized`, `runtimeState` (`live`, `frozen`, or `hidden`), and `presentationMode`. It also has `emit(type, detail)` and `on(type, listener)`, a small bus every pane shares. Call `on` from `mount` and use the function it returns to unsubscribe. Custom elements also receive a `tape-pane-state` event.
 
-These sources work too:
-
-- `{ kind: "html", html }`
-- `{ kind: "element", tag: "my-widget" }`
-- `{ kind: "react" | "vue" | "svelte", component }`
-- `{ kind: "mount", mount }`
-
-The arrangement is saved in `localStorage` under `niri-js`, including named workspaces and recently closed panes. The header chip switches workspaces. **Export** downloads the current strip as JSON, and **Import** replaces that strip. `Reset` restores the original panes in the current workspace. A `?pane=` query opens on that pane.
+The arrangement is saved in `localStorage` under the `storageKey` you pass (`niri-js` in the demo), including named workspaces and recently closed panes. The header chip switches workspaces. **Export** downloads the current strip as JSON, and **Import** replaces that strip. `Reset` restores the original panes in the current workspace. A `?pane=` query opens on that pane.
