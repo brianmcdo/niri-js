@@ -12,6 +12,22 @@ export interface SpotlightHit extends SpotlightEntry {
   titleMarks: number[];
 }
 
+export type PaletteKind = "pane" | "command" | "closed" | "workspace";
+
+export interface PaletteEntry {
+  id: string;
+  kind: PaletteKind;
+  title: string;
+  kindLabel: string;
+  where: string;
+  keywords?: string;
+}
+
+export interface PaletteHit extends PaletteEntry {
+  score: number;
+  titleMarks: number[];
+}
+
 interface FieldScore {
   score: number;
   marks: number[];
@@ -44,6 +60,43 @@ export function searchPanes(panes: readonly SpotlightEntry[], query: string, act
       index,
       hit: { ...pane, score: best.score, titleMarks: best.marks },
     });
+  });
+  ranked.sort((left, right) => right.hit.score - left.hit.score || left.index - right.index);
+  return ranked.map((item) => item.hit);
+}
+
+const kindOrder: PaletteKind[] = ["pane", "closed", "workspace", "command"];
+
+/** Rank panes, closed panes, workspaces, and commands in one list. */
+export function searchPalette(entries: readonly PaletteEntry[], query: string, activeId?: string | null): PaletteHit[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    const panes = entries.filter((entry) => entry.kind === "pane");
+    const rest = panes.filter((entry) => entry.id !== activeId);
+    const active = panes.find((entry) => entry.id === activeId);
+    const orderedPanes = active ? [active, ...rest] : panes;
+    const tail = kindOrder
+      .filter((kind) => kind !== "pane")
+      .flatMap((kind) => entries.filter((entry) => entry.kind === kind));
+    return [...orderedPanes, ...tail].map((entry) => ({ ...entry, score: 0, titleMarks: [] }));
+  }
+
+  const ranked: { hit: PaletteHit; index: number }[] = [];
+  entries.forEach((entry, index) => {
+    const title = scoreField(entry.title, needle);
+    const id = scoreField(entry.id, needle);
+    const kind = scoreField(entry.kindLabel, needle);
+    const where = scoreField(entry.where, needle);
+    const keywords = entry.keywords ? scoreField(entry.keywords, needle) : null;
+    const best = bestScore([
+      title,
+      id ? { score: id.score * 0.9, marks: [] } : null,
+      kind ? { score: kind.score * 0.7, marks: [] } : null,
+      where ? { score: where.score * 0.6, marks: [] } : null,
+      keywords ? { score: keywords.score * 0.85, marks: [] } : null,
+    ]);
+    if (!best || (entry.kind !== "pane" && best.score < 55)) return;
+    ranked.push({ index, hit: { ...entry, score: best.score, titleMarks: best.marks } });
   });
   ranked.sort((left, right) => right.hit.score - left.hit.score || left.index - right.index);
   return ranked.map((item) => item.hit);

@@ -14,4 +14,4 @@ const server = Bun.serve({
   },
 });
 
-console.log(`Tape workspace at ${server.url}`);
+console.log(`niri-js at ${server.url}`);

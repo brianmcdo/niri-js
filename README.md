@@ -1,4 +1,4 @@
-# Tape
+# niri-js
 
 A native scrolling workspace, in the spirit of [Onirigiri](https://github.com/riteofstring/onirigiri) and [niri](https://github.com/niri-wm/niri). Panes sit in columns on a horizontal strip. Opening one adds a column instead of shrinking the others. The camera scrolls to the focused pane, and overview zooms out to the whole strip.
 
@@ -30,8 +30,12 @@ Alt (Option on a Mac) is the modifier.
 | Alt+G | Group the focused pane. Click the group to walk its panes |
 | Alt+] / Alt+[ | Next or previous pane in the group |
 | Alt+Shift+Home | Return to the first pane |
-| Command+K or Ctrl+K | Search panes and jump to one |
-| Escape | Leave overview, the column selection, maximize, or search |
+| Command+K or Ctrl+K | Search panes, commands, and workspaces |
+| Alt+W | Close the focused pane |
+| Alt+Shift+W | Reopen the last closed pane |
+| Command+[ or Ctrl+[ | Back to the previous pane |
+| Command+] or Ctrl+] | Forward again |
+| Escape | Leave overview, the column selection, maximize, search, or a menu |
 
 Drag a title bar to drop a pane on another cell. Drag the right edge to resize a column, or the bottom edge to resize a split.
 
@@ -59,7 +63,7 @@ export function mount(host, context) {
 }
 ```
 
-`context` includes `focused`, `visible`, `maximized`, `runtimeState` (`live`, `frozen`, or `hidden`), and `presentationMode`. Custom elements also receive a `tape-pane-state` event.
+`context` includes `focused`, `visible`, `maximized`, `runtimeState` (`live`, `frozen`, or `hidden`), and `presentationMode`. It also has `emit(type, detail)` and `on(type, listener)`, a small bus every pane shares. Call `on` from `mount` and use the function it returns to unsubscribe. Custom elements also receive a `tape-pane-state` event.
 
 These sources work too:
 
@@ -68,4 +72,4 @@ These sources work too:
 - `{ kind: "react" | "vue" | "svelte", component }`
 - `{ kind: "mount", mount }`
 
-The arrangement is saved in `localStorage` under `scrolling-tape-layout`. `Reset` restores the original strip. A `?pane=` query opens on that pane.
+The arrangement is saved in `localStorage` under `niri-js`, including named workspaces and recently closed panes. The header chip switches workspaces. **Export** downloads the current strip as JSON, and **Import** replaces that strip. `Reset` restores the original panes in the current workspace. A `?pane=` query opens on that pane.

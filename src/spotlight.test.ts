@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { searchPanes, type SpotlightEntry } from "./spotlight.ts";
+import { searchPanes, searchPalette, type SpotlightEntry } from "./spotlight.ts";
 
 const panes: SpotlightEntry[] = [
   { paneId: "guide", title: "Guide", surfaceKind: "html" },
@@ -43,4 +43,29 @@ test("a loose subsequence still finds the pane", () => {
 
 test("nothing matches an unrelated query", () => {
   expect(searchPanes(panes, "zzzz")).toEqual([]);
+});
+
+test("an empty palette lists panes first, then closed panes, workspaces, and commands", () => {
+  const hits = searchPalette(
+    [
+      { id: "guide", kind: "pane", title: "Guide", kindLabel: "html", where: "Column 1" },
+      { id: "clock", kind: "pane", title: "Clock", kindLabel: "element", where: "Column 2" },
+      { id: "notes", kind: "closed", title: "Notes", kindLabel: "closed", where: "Reopen" },
+      { id: "main", kind: "workspace", title: "Main", kindLabel: "space", where: "Current" },
+      { id: "overview", kind: "command", title: "Overview", kindLabel: "command", where: "⌥+O", keywords: "zoom" },
+    ],
+    "",
+    "clock",
+  );
+  expect(hits.map((hit) => hit.id)).toEqual(["clock", "guide", "notes", "main", "overview"]);
+});
+
+test("a command matches its name and a loose pane query does not pull commands in", () => {
+  const entries = [
+    { id: "ledger", kind: "pane" as const, title: "Ledger", kindLabel: "react", where: "Column 3" },
+    { id: "overview", kind: "command" as const, title: "Overview", kindLabel: "command", where: "", keywords: "zoom" },
+    { id: "reopen-pane", kind: "command" as const, title: "Reopen closed pane", kindLabel: "command", where: "" },
+  ];
+  expect(searchPalette(entries, "over").map((hit) => hit.id)).toEqual(["overview"]);
+  expect(searchPalette(entries, "led").map((hit) => hit.id)).toEqual(["ledger"]);
 });

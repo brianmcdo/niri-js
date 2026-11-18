@@ -57,7 +57,7 @@ async function mountModule(host: HTMLElement, url: string, context: PaneContext)
     return defineAndMount(host, ctor as CustomElementConstructor, tag, context);
   }
   throw new Error(
-    "This module does not export mount(host, context) or a custom element. Open a local .tsx, .vue, .svelte, or element file so Tape can wrap it.",
+    "This module does not export mount(host, context) or a custom element. Open a local .tsx, .vue, .svelte, or element file so niri-js can wrap it.",
   );
 }
 

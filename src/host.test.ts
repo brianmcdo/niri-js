@@ -16,6 +16,8 @@ function context(overrides: Partial<PaneContext> = {}): PaneContext {
     runtimeState: "live",
     presentationMode: "normal",
     props: {},
+    emit() {},
+    on: () => () => {},
     ...overrides,
   };
 }

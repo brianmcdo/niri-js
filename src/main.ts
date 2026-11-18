@@ -8,7 +8,7 @@ if (!(root instanceof HTMLElement)) {
 
 new TapeWorkspace(root, {
   workspaceId: "tape",
-  storageKey: "scrolling-tape-layout",
+  storageKey: "niri-js",
   panes: samplePanes(),
   columns: sampleColumns,
   groups: sampleGroups,

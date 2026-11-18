@@ -154,6 +154,28 @@ export function openPane(layout: Layout, paneId: string, columnWidth: number): L
   return next;
 }
 
+/** Put a pane back where it was. A missing column is recreated; a live column gains the cell at that row. */
+export function openPaneAt(layout: Layout, paneId: string, at: Cursor, columnWidth: number): Layout {
+  const next = clone(layout);
+  const plane = ensurePlane(next, at.plane);
+  const column = columnAt(plane, at.column);
+  if (!column) {
+    plane.columns.push({
+      index: at.column,
+      widthPx: clampWidth(columnWidth),
+      cells: [cell(paneId)],
+    });
+    next.cursor = { plane: plane.index, column: at.column, row: 0 };
+  } else {
+    const row = Math.min(Math.max(at.row, 0), column.cells.length);
+    column.cells.splice(row, 0, cell(paneId));
+    next.cursor = { plane: plane.index, column: column.index, row };
+  }
+  next.maximizedPaneId = null;
+  if (!next.homePaneId) next.homePaneId = paneId;
+  return next;
+}
+
 export function closePane(layout: Layout, paneId: string): Layout {
   const focusedId = paneAt(layout, layout.cursor);
   const next = clone(layout);

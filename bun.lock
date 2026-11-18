@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "scrolling-tape-layout",
+      "name": "niri-js",
       "dependencies": {
         "@vue/compiler-sfc": "^3.5.45",
         "react": "^19.3.1",

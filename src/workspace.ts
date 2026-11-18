@@ -15,6 +15,7 @@ import {
   moveColumn,
   movePane,
   openPane as openInLayout,
+  openPaneAt,
   paneIds,
   relocatePane,
   removeBlank,
@@ -28,7 +29,19 @@ import {
 import type { SeedColumn } from "./layout.ts";
 import { assertLayout } from "./layout.ts";
 import { matchShortcut, shortcutLabel, type ShortcutAction } from "./shortcuts.ts";
-import { searchPanes, type SpotlightHit } from "./spotlight.ts";
+import { searchPalette, type PaletteHit } from "./spotlight.ts";
+import { PaneBus } from "./bus.ts";
+import { emptyTrail, forgetFocus, recordFocus, stepBack, stepForward, type FocusTrail } from "./history.ts";
+import {
+  exportDocument,
+  parseLayoutFile,
+  parseSession,
+  pushClosed,
+  serializableSnapshot,
+  workspaceIdFor,
+  type ClosedRecord,
+  type WorkspaceSnapshot,
+} from "./session.ts";
 import {
   addPaneToGroup,
   assignPane,
@@ -40,7 +53,7 @@ import {
   withGroups,
   type PaneGroup,
 } from "./groups.ts";
-import type { Box, Cursor, Layout, PaneContext, PaneDefinition, PaneHandle, PaneSource, Scene } from "./types.ts";
+import type { Box, Cursor, Layout, PaneBusEvent, PaneContext, PaneDefinition, PaneHandle, PaneSource, Scene } from "./types.ts";
 
 export interface TapeWorkspaceOptions {
   workspaceId?: string;
@@ -107,7 +120,19 @@ export class TapeWorkspace {
   private readonly spotlightList: HTMLUListElement;
   private readonly spotlightEmpty: HTMLParagraphElement;
   private spotlightIndex = 0;
-  private spotlightHits: SpotlightHit[] = [];
+  private spotlightHits: PaletteHit[] = [];
+  private readonly workspaceButton: HTMLButtonElement;
+  private readonly workspaceMenu: HTMLElement;
+  private readonly workspaceMenuList: HTMLElement;
+  private readonly workspaceNameInput: HTMLInputElement;
+  private readonly importInput: HTMLInputElement;
+  private readonly bus = new PaneBus();
+  private readonly busStops = new Map<string, Set<() => void>>();
+  private trail: FocusTrail = emptyTrail();
+  private suppressHistory = false;
+  private closed: ClosedRecord[] = [];
+  private workspaces: WorkspaceSnapshot[] = [];
+  private activeWorkspaceId: string;
   private readonly overviewButton: HTMLButtonElement;
   private readonly options: Required<
     Pick<
@@ -177,6 +202,7 @@ export class TapeWorkspace {
     this.initialColumns = options.columns ?? this.initialPanes.map((pane) => ({ paneIds: [pane.paneId] }));
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.layout = createLayout(this.options.workspaceId, [], defaultColumnWidth(1200));
+    this.activeWorkspaceId = this.options.workspaceId;
 
     this.root = document.createElement("div");
     this.root.className = "tape";
@@ -187,11 +213,13 @@ export class TapeWorkspace {
     bar.className = "tape-bar";
     this.groupBar = document.createElement("div");
     this.groupBar.className = "tape-groups";
-    bar.append(mark(), hint(apple), this.groupBar);
+    this.workspaceButton = command("Main", "Workspaces", () => this.toggleWorkspaceMenu());
+    this.workspaceButton.classList.add("tape-workspace-chip");
+    bar.append(mark(), hint(apple), this.workspaceButton, this.groupBar);
     const actions = document.createElement("div");
     actions.className = "tape-bar-actions";
     actions.append(
-      command("Search", label("spotlight", "Search panes"), () => this.openSpotlight()),
+      command("Search", label("spotlight", "Search panes and commands"), () => this.openSpotlight()),
       command("Group", label("editGroup", "Group the focused pane"), () => this.openGroupMenu()),
       command("Reset", "Restore the original panes", () => this.reset()),
       command("New pane", "Load a component into a pane", () => this.openDialog()),
@@ -202,7 +230,7 @@ export class TapeWorkspace {
     this.stage.className = "tape-stage";
     this.stage.tabIndex = 0;
     this.stage.setAttribute("role", "region");
-    this.stage.setAttribute("aria-label", "Tape workspace");
+    this.stage.setAttribute("aria-label", "niri-js workspace");
     this.world = document.createElement("div");
     this.world.className = "tape-world";
     this.ring = document.createElement("div");
@@ -279,9 +307,27 @@ export class TapeWorkspace {
     this.groupMenuTitle = menu.title;
     this.groupMenuRemove = menu.remove;
     this.groupMenuInput = menu.input;
+    const spaces = buildWorkspaceMenu(
+      (name) => this.createWorkspace(name),
+      (name) => this.renameWorkspace(name),
+      () => this.exportLayout(),
+      () => this.importInput.click(),
+    );
+    this.workspaceMenu = spaces.root;
+    this.workspaceMenuList = spaces.list;
+    this.workspaceNameInput = spaces.rename;
+    this.importInput = document.createElement("input");
+    this.importInput.type = "file";
+    this.importInput.accept = "application/json,.json";
+    this.importInput.hidden = true;
+    this.importInput.addEventListener("change", () => {
+      const file = this.importInput.files?.[0];
+      this.importInput.value = "";
+      if (file) void this.importLayout(file);
+    });
 
     this.stage.append(this.world, this.minimap, controls);
-    this.root.append(bar, this.groupMenu, this.stage, this.status, this.dialog, this.spotlight);
+    this.root.append(bar, this.groupMenu, this.workspaceMenu, this.stage, this.status, this.dialog, this.spotlight, this.importInput);
     container.replaceChildren(this.root);
 
     this.stage.addEventListener("pointerdown", this.onPointerDown);
@@ -303,6 +349,8 @@ export class TapeWorkspace {
     window.removeEventListener("pointercancel", this.onPointerUp);
     if (this.frameId) cancelAnimationFrame(this.frameId);
     for (const handle of this.handles.values()) handle.destroy();
+    this.bus.clear();
+    this.busStops.clear();
     this.root.remove();
   }
 
@@ -314,8 +362,19 @@ export class TapeWorkspace {
   }
 
   closePane(paneId: string): void {
-    if (!this.panes.has(paneId) && !paneIds(this.layout).includes(paneId)) return;
+    const pane = this.panes.get(paneId);
+    const cursor = findCursor(this.layout, paneId);
+    if (!pane && !cursor) return;
+    if (pane && cursor) {
+      this.closed = pushClosed(this.closed, {
+        pane: copyPane(pane),
+        cursor,
+        groupId: groupOf(this.layout.groups, paneId)?.id ?? null,
+      });
+    }
     this.apply(closeInLayout(this.layout, paneId));
+    this.trail = forgetFocus(this.trail, paneId);
+    this.releaseBus(paneId);
     this.panes.delete(paneId);
   }
 
@@ -351,11 +410,12 @@ export class TapeWorkspace {
   }
 
   private reset(): void {
-    if (this.options.storageKey) localStorage.removeItem(this.options.storageKey);
     this.overview = false;
     this.group = false;
     this.activeGroupId = null;
     this.closeGroupMenu();
+    this.closeWorkspaceMenu();
+    this.closed = [];
     this.useInitial();
     this.snapNext = true;
     this.clearShells();
@@ -392,16 +452,15 @@ export class TapeWorkspace {
   private restore(): void {
     const saved = this.readStorage();
     if (saved) {
-      this.layout = saved.layout;
-      this.panes.clear();
-      for (const pane of saved.panes) this.panes.set(pane.paneId, pane);
-      for (const id of paneIds(this.layout)) {
-        if (!this.panes.has(id)) this.panes.set(id, missingPane(id));
-      }
+      this.workspaces = saved.workspaces;
+      this.closed = saved.closed;
+      const active = saved.workspaces.find((item) => item.id === saved.activeId) ?? saved.workspaces[0];
+      if (active) this.loadSnapshot(active);
     } else if (this.options.layout) {
       assertLayout(this.options.layout);
       this.layout = structuredClone(this.options.layout);
       for (const pane of this.initialPanes) this.panes.set(pane.paneId, pane);
+      this.rememberActive();
     } else {
       this.useInitial();
     }
@@ -416,32 +475,34 @@ export class TapeWorkspace {
     this.panes.clear();
     for (const pane of this.initialPanes) this.panes.set(pane.paneId, copyPane(pane));
     this.layout = createLayout(
-      this.options.workspaceId ?? "tape",
+      this.activeWorkspaceId,
       this.initialColumns,
       defaultColumnWidth(this.viewport.width || window.innerWidth),
     );
     if (this.options.groups?.length) {
       this.layout.groups = normalizeGroups(this.options.groups, new Set(paneIds(this.layout)));
     }
+    this.trail = emptyTrail();
+    this.rememberActive();
   }
 
-  private readStorage(): { layout: Layout; panes: PaneDefinition[] } | null {
+  private readStorage(): ReturnType<typeof parseSession> {
     if (!this.options.storageKey) return null;
     const raw = localStorage.getItem(this.options.storageKey);
     if (!raw) return null;
-    try {
-      const saved = JSON.parse(raw) as { layout?: unknown; panes?: PaneDefinition[] };
-      assertLayout(saved.layout);
-      const panes = Array.isArray(saved.panes) ? saved.panes.filter(isPane) : [];
-      return { layout: saved.layout, panes };
-    } catch {
+    const saved = parseSession(raw);
+    if (!saved) {
       localStorage.removeItem(this.options.storageKey);
       return null;
     }
+    return saved;
   }
 
   private apply(next: Layout): void {
     if (next === this.layout) return;
+    const from = paneAt(this.layout);
+    const to = paneAt(next);
+    if (!this.suppressHistory) this.trail = recordFocus(this.trail, from, to);
     const previous = `${this.layout.cursor.plane}:${this.layout.cursor.column}`;
     this.layout = next;
     if (`${next.cursor.plane}:${next.cursor.column}` !== previous) this.group = false;
@@ -464,6 +525,7 @@ export class TapeWorkspace {
       this.tokens.set(id, (this.tokens.get(id) ?? 0) + 1);
       this.handles.get(id)?.destroy();
       this.handles.delete(id);
+      this.releaseBus(id);
       shell.root.remove();
       this.shells.delete(id);
     }
@@ -529,6 +591,8 @@ export class TapeWorkspace {
     this.root.classList.toggle("is-grouped", this.activeGroupId !== null);
     this.paintGroupBar();
     if (!this.groupMenu.hidden) this.paintGroupMenu();
+    this.paintWorkspaceButton();
+    if (!this.workspaceMenu.hidden) this.paintWorkspaceMenu();
     this.overviewButton.setAttribute("aria-pressed", String(this.overview));
     this.retarget();
     this.kick();
@@ -762,6 +826,8 @@ export class TapeWorkspace {
       runtimeState,
       presentationMode: this.compact ? "compact" : this.overview ? "overview" : "normal",
       props,
+      emit: (type, detail) => this.bus.emit(pane.paneId, type, detail),
+      on: (type, listener) => this.listen(pane.paneId, type, listener),
     };
   }
 
@@ -837,18 +903,18 @@ export class TapeWorkspace {
   }
 
   private persist(): void {
+    this.stashActive();
     if (!this.options.storageKey) return;
-    let layout = this.layout;
-    const panes: PaneDefinition[] = [];
-    for (const id of paneIds(layout)) {
-      const pane = this.panes.get(id);
-      if (!pane || !serializable(pane.source)) {
-        layout = closeInLayout(layout, id);
-        continue;
-      }
-      panes.push(pane);
-    }
-    localStorage.setItem(this.options.storageKey, JSON.stringify({ schema: 1, layout, panes }));
+    const closed = this.closed.filter((item) => serializable(item.pane.source));
+    localStorage.setItem(
+      this.options.storageKey,
+      JSON.stringify({
+        schema: 2,
+        activeId: this.activeWorkspaceId,
+        workspaces: this.workspaces.map((workspace) => serializableSnapshot(workspace)),
+        closed,
+      }),
+    );
   }
 
   private handleKey(event: KeyboardEvent): void {
@@ -864,6 +930,13 @@ export class TapeWorkspace {
       if (event.key === "Escape" || matchShortcut(event) === "editGroup") {
         event.preventDefault();
         this.closeGroupMenu();
+      }
+      return;
+    }
+    if (!this.workspaceMenu.hidden) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.closeWorkspaceMenu();
       }
       return;
     }
@@ -994,6 +1067,18 @@ export class TapeWorkspace {
         break;
       case "spotlight":
         this.openSpotlight();
+        break;
+      case "closePane":
+        this.closeFocused();
+        break;
+      case "reopenPane":
+        this.reopenClosed();
+        break;
+      case "historyBack":
+        this.travel(-1);
+        break;
+      case "historyForward":
+        this.travel(1);
         break;
     }
   }
@@ -1157,6 +1242,7 @@ export class TapeWorkspace {
   private openGroupMenu(paneId?: string): void {
     const id = paneId ?? paneAt(this.layout);
     if (!id) return;
+    this.closeWorkspaceMenu();
     this.groupMenuPaneId = id;
     this.groupMenu.hidden = false;
     this.groupMenuInput.value = "";
@@ -1282,6 +1368,7 @@ export class TapeWorkspace {
       return;
     }
     this.closeGroupMenu();
+    this.closeWorkspaceMenu();
     if (this.dialog.open) this.closeDialog();
     this.spotlightIndex = 0;
     this.spotlightInput.value = "";
@@ -1323,20 +1410,14 @@ export class TapeWorkspace {
     const hit = this.spotlightHits[this.spotlightIndex];
     if (!hit) return;
     this.closeSpotlight();
-    this.focusPane(hit.paneId);
+    if (hit.kind === "pane") this.focusPane(hit.id);
+    else if (hit.kind === "closed") this.reopenClosed(hit.id);
+    else if (hit.kind === "workspace") this.switchWorkspace(hit.id);
+    else this.runCommand(hit.id);
   }
 
   private renderSpotlight(): void {
-    const entries = paneIds(this.layout).map((id) => {
-      const pane = this.panes.get(id);
-      return {
-        paneId: id,
-        title: pane?.title ?? id,
-        surfaceKind: pane?.surfaceKind ?? "pane",
-        keywords: groupOf(this.layout.groups, id)?.name ?? "",
-      };
-    });
-    this.spotlightHits = searchPanes(entries, this.spotlightInput.value, paneAt(this.layout));
+    this.spotlightHits = searchPalette(this.paletteEntries(), this.spotlightInput.value, paneAt(this.layout));
     if (this.spotlightIndex > this.spotlightHits.length - 1) this.spotlightIndex = 0;
     this.spotlightList.replaceChildren();
     this.spotlightHits.forEach((hit, index) => {
@@ -1347,14 +1428,13 @@ export class TapeWorkspace {
       option.setAttribute("role", "option");
       const kind = document.createElement("span");
       kind.className = "tape-spotlight-kind";
-      kind.textContent = hit.surfaceKind;
+      kind.textContent = hit.kindLabel;
       const title = document.createElement("span");
       title.className = "tape-spotlight-title";
       title.append(markedText(hit.title, hit.titleMarks));
       const where = document.createElement("span");
       where.className = "tape-spotlight-where";
-      const membership = groupOf(this.layout.groups, hit.paneId);
-      where.textContent = [membership?.name, this.placeLabel(hit.paneId)].filter(Boolean).join(" · ");
+      where.textContent = hit.where;
       option.append(kind, title, where);
       option.addEventListener("mouseenter", () => {
         this.spotlightIndex = index;
@@ -1412,6 +1492,339 @@ export class TapeWorkspace {
     for (const shell of this.shells.values()) shell.root.remove();
     this.shells.clear();
     this.tokens.clear();
+    this.contextKeys.clear();
+    this.bus.clear();
+    this.busStops.clear();
+  }
+
+  private closeFocused(): void {
+    const id = paneAt(this.layout);
+    if (id) this.closePane(id);
+  }
+
+  private reopenClosed(paneId?: string): void {
+    const index = paneId ? this.closed.findIndex((item) => item.pane.paneId === paneId) : 0;
+    if (index < 0 || !this.closed[index]) return;
+    const [record] = this.closed.splice(index, 1);
+    if (!record) return;
+    const id = uniqueId(record.pane.paneId, this.panes);
+    const pane = { ...copyPane(record.pane), paneId: id };
+    this.panes.set(id, pane);
+    let next = openPaneAt(this.layout, id, record.cursor, this.columnWidth());
+    if (record.groupId && next.groups.some((group) => group.id === record.groupId)) {
+      next = withGroups(next, assignPane(next.groups, id, record.groupId));
+    }
+    this.apply(next);
+  }
+
+  private travel(direction: -1 | 1): void {
+    const alive = (id: string) => findCursor(this.layout, id) !== null;
+    const current = paneAt(this.layout);
+    const step = direction < 0 ? stepBack(this.trail, current, alive) : stepForward(this.trail, current, alive);
+    this.trail = step.trail;
+    if (!step.target) return;
+    this.suppressHistory = true;
+    this.focusPane(step.target);
+    this.suppressHistory = false;
+  }
+
+  private listen(paneId: string, type: string, listener: (event: PaneBusEvent) => void): () => void {
+    const stop = this.bus.on(type, listener);
+    const stops = this.busStops.get(paneId) ?? new Set();
+    stops.add(stop);
+    this.busStops.set(paneId, stops);
+    return () => {
+      stop();
+      stops.delete(stop);
+    };
+  }
+
+  private releaseBus(paneId: string): void {
+    for (const stop of this.busStops.get(paneId) ?? []) stop();
+    this.busStops.delete(paneId);
+  }
+
+  private paletteEntries() {
+    const commands: { id: string; title: string; keywords: string; shortcut?: ShortcutAction }[] = [
+      { id: "new-pane", title: "New pane", keywords: "open create load" },
+      { id: "close-pane", title: "Close pane", keywords: "remove delete", shortcut: "closePane" },
+      { id: "reopen-pane", title: "Reopen closed pane", keywords: "undo restore", shortcut: "reopenPane" },
+      { id: "back", title: "Back", keywords: "history previous", shortcut: "historyBack" },
+      { id: "forward", title: "Forward", keywords: "history next", shortcut: "historyForward" },
+      { id: "group", title: "Group the focused pane", keywords: "tag set", shortcut: "editGroup" },
+      { id: "overview", title: "Overview", keywords: "zoom all panes", shortcut: "overview" },
+      { id: "maximize", title: "Maximize", keywords: "fill stage", shortcut: "maximize" },
+      { id: "home", title: "Return home", keywords: "first pane", shortcut: "home" },
+      { id: "reset", title: "Reset workspace", keywords: "restore original panes" },
+      { id: "new-workspace", title: "New workspace", keywords: "space layout" },
+      { id: "rename-workspace", title: "Rename workspace", keywords: "space name" },
+      { id: "export-layout", title: "Export layout", keywords: "download json save" },
+      { id: "import-layout", title: "Import layout", keywords: "upload json open file" },
+    ];
+    return [
+      ...paneIds(this.layout).map((id) => {
+        const pane = this.panes.get(id);
+        const membership = groupOf(this.layout.groups, id)?.name;
+        return {
+          id,
+          kind: "pane" as const,
+          title: pane?.title ?? id,
+          kindLabel: pane?.surfaceKind ?? "pane",
+          where: [membership, this.placeLabel(id)].filter(Boolean).join(" · "),
+          keywords: membership ?? "",
+        };
+      }),
+      ...this.closed.map((record) => ({
+        id: record.pane.paneId,
+        kind: "closed" as const,
+        title: record.pane.title,
+        kindLabel: "closed",
+        where: "Reopen",
+        keywords: record.pane.surfaceKind,
+      })),
+      ...this.workspaces.map((workspace) => ({
+        id: workspace.id,
+        kind: "workspace" as const,
+        title: workspace.name,
+        kindLabel: "space",
+        where: workspace.id === this.activeWorkspaceId ? "Current" : "Switch",
+        keywords: "workspace",
+      })),
+      ...commands.map((command) => ({
+        id: command.id,
+        kind: "command" as const,
+        title: command.title,
+        kindLabel: "command",
+        where: command.shortcut ? shortcutLabel(command.shortcut, apple) : "",
+        keywords: command.keywords,
+      })),
+    ];
+  }
+
+  private runCommand(id: string): void {
+    switch (id) {
+      case "new-pane":
+        this.openDialog();
+        break;
+      case "close-pane":
+        this.closeFocused();
+        break;
+      case "reopen-pane":
+        this.reopenClosed();
+        break;
+      case "back":
+        this.travel(-1);
+        break;
+      case "forward":
+        this.travel(1);
+        break;
+      case "group":
+        this.openGroupMenu();
+        break;
+      case "overview":
+        this.toggleOverview();
+        break;
+      case "maximize":
+        this.apply(toggleMaximized(this.layout));
+        break;
+      case "home":
+        this.goHome();
+        break;
+      case "reset":
+        this.reset();
+        break;
+      case "new-workspace":
+        this.openWorkspaceMenu(true);
+        break;
+      case "rename-workspace":
+        this.openWorkspaceMenu(false);
+        break;
+      case "export-layout":
+        this.exportLayout();
+        break;
+      case "import-layout":
+        this.importInput.click();
+        break;
+    }
+  }
+
+  private stashActive(): void {
+    const panes: PaneDefinition[] = [];
+    for (const id of paneIds(this.layout)) {
+      const pane = this.panes.get(id);
+      if (pane) panes.push(copyPane(pane));
+    }
+    const snapshot: WorkspaceSnapshot = {
+      id: this.activeWorkspaceId,
+      name: this.workspaceName(),
+      layout: structuredClone(this.layout),
+      panes,
+    };
+    const index = this.workspaces.findIndex((item) => item.id === snapshot.id);
+    if (index >= 0) this.workspaces[index] = snapshot;
+    else this.workspaces.push(snapshot);
+  }
+
+  private rememberActive(): void {
+    if (this.workspaces.some((item) => item.id === this.activeWorkspaceId)) return;
+    this.workspaces.push({
+      id: this.activeWorkspaceId,
+      name: "Main",
+      layout: structuredClone(this.layout),
+      panes: [...this.panes.values()].map((pane) => copyPane(pane)),
+    });
+  }
+
+  private loadSnapshot(snapshot: WorkspaceSnapshot): void {
+    this.activeWorkspaceId = snapshot.id;
+    this.layout = structuredClone(snapshot.layout);
+    this.panes.clear();
+    for (const pane of snapshot.panes) this.panes.set(pane.paneId, copyPane(pane));
+    for (const id of paneIds(this.layout)) {
+      if (!this.panes.has(id)) this.panes.set(id, missingPane(id));
+    }
+    this.trail = emptyTrail();
+  }
+
+  private workspaceName(): string {
+    return this.workspaces.find((item) => item.id === this.activeWorkspaceId)?.name ?? "Main";
+  }
+
+  private toggleWorkspaceMenu(): void {
+    if (this.workspaceMenu.hidden) this.openWorkspaceMenu(true);
+    else this.closeWorkspaceMenu();
+  }
+
+  private openWorkspaceMenu(create: boolean): void {
+    this.closeGroupMenu();
+    this.workspaceMenu.hidden = false;
+    this.workspaceNameInput.value = this.workspaceName();
+    this.paintWorkspaceMenu();
+    this.paintWorkspaceButton();
+    const field = create ? this.workspaceMenu.querySelector<HTMLInputElement>('input[name="workspace"]') : this.workspaceNameInput;
+    field?.focus();
+    field?.select();
+  }
+
+  private closeWorkspaceMenu(): void {
+    this.workspaceMenu.hidden = true;
+    this.paintWorkspaceButton();
+  }
+
+  private paintWorkspaceButton(): void {
+    const name = this.workspaceName();
+    this.workspaceButton.textContent = name;
+    this.workspaceButton.title = `Workspace ${name}`;
+    this.workspaceButton.setAttribute("aria-label", `Workspace ${name}`);
+    this.workspaceButton.setAttribute("aria-pressed", String(!this.workspaceMenu.hidden));
+  }
+
+  private paintWorkspaceMenu(): void {
+    this.workspaceMenuList.replaceChildren();
+    for (const workspace of this.workspaces) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tape-group-choice";
+      button.textContent = workspace.name;
+      button.setAttribute("aria-pressed", String(workspace.id === this.activeWorkspaceId));
+      button.addEventListener("click", () => this.switchWorkspace(workspace.id));
+      this.workspaceMenuList.append(button);
+    }
+  }
+
+  private switchWorkspace(id: string): void {
+    if (id === this.activeWorkspaceId) {
+      this.closeWorkspaceMenu();
+      return;
+    }
+    const next = this.workspaces.find((item) => item.id === id);
+    if (!next) return;
+    this.stashActive();
+    this.overview = false;
+    this.group = false;
+    this.activeGroupId = null;
+    this.closeGroupMenu();
+    this.loadSnapshot(next);
+    this.snapNext = true;
+    this.clearShells();
+    this.render();
+    this.persist();
+    this.announce();
+    this.writePaneLink();
+    this.closeWorkspaceMenu();
+  }
+
+  private createWorkspace(name: string): void {
+    const trimmed = name.trim().slice(0, 40);
+    if (!trimmed) return;
+    this.stashActive();
+    const id = workspaceIdFor(trimmed, new Set(this.workspaces.map((item) => item.id)));
+    this.activeWorkspaceId = id;
+    this.workspaces.push({ id, name: trimmed, layout: this.layout, panes: [] });
+    this.overview = false;
+    this.group = false;
+    this.activeGroupId = null;
+    this.closeGroupMenu();
+    this.useInitial();
+    this.snapNext = true;
+    this.clearShells();
+    this.render();
+    this.persist();
+    this.announce();
+    this.writePaneLink();
+    this.closeWorkspaceMenu();
+  }
+
+  private renameWorkspace(name: string): void {
+    const trimmed = name.trim().slice(0, 40);
+    if (!trimmed) return;
+    const current = this.workspaces.find((item) => item.id === this.activeWorkspaceId);
+    if (current) current.name = trimmed;
+    else this.rememberActive();
+    const created = this.workspaces.find((item) => item.id === this.activeWorkspaceId);
+    if (created) created.name = trimmed;
+    this.persist();
+    this.paintWorkspaceButton();
+    this.paintWorkspaceMenu();
+  }
+
+  private exportLayout(): void {
+    this.stashActive();
+    const current = this.workspaces.find((item) => item.id === this.activeWorkspaceId);
+    if (!current) return;
+    const blob = new Blob([exportDocument(current)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${workspaceIdFor(current.name, new Set())}.json`;
+    this.root.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  private async importLayout(file: File): Promise<void> {
+    const parsed = parseLayoutFile(await file.text());
+    if (!parsed) return;
+    this.overview = false;
+    this.group = false;
+    this.activeGroupId = null;
+    this.closeGroupMenu();
+    this.panes.clear();
+    for (const pane of parsed.panes) this.panes.set(pane.paneId, copyPane(pane));
+    this.layout = structuredClone(parsed.layout);
+    this.layout.workspaceId = this.activeWorkspaceId;
+    for (const id of paneIds(this.layout)) {
+      if (!this.panes.has(id)) this.panes.set(id, missingPane(id));
+    }
+    this.trail = emptyTrail();
+    this.snapNext = true;
+    this.clearShells();
+    this.render();
+    this.persist();
+    this.announce();
+    this.writePaneLink();
+    this.closeWorkspaceMenu();
   }
 
   private columnWidth(): number {
@@ -1595,7 +2008,7 @@ function mark(): HTMLElement {
   logo.className = "tape-logo";
   logo.setAttribute("aria-hidden", "true");
   const name = document.createElement("strong");
-  name.textContent = "Tape";
+  name.textContent = "niri-js";
   const sub = document.createElement("span");
   sub.textContent = "spatial panes";
   wrap.append(logo, name, sub);
@@ -1605,7 +2018,7 @@ function mark(): HTMLElement {
 function hint(mac: boolean): HTMLElement {
   const node = document.createElement("p");
   node.className = "tape-hint";
-  node.textContent = mac ? "⌥ arrows move · ⌘K search" : "Alt+arrows move · Ctrl+K search";
+  node.textContent = mac ? "⌥ arrows move · ⌘K commands" : "Alt+arrows move · Ctrl+K commands";
   return node;
 }
 
@@ -1653,6 +2066,64 @@ function buildGroupMenu(
   return { root, title, list, remove, input };
 }
 
+function buildWorkspaceMenu(
+  onCreate: (name: string) => void,
+  onRename: (name: string) => void,
+  onExport: () => void,
+  onImport: () => void,
+): { root: HTMLElement; list: HTMLElement; rename: HTMLInputElement } {
+  const root = document.createElement("div");
+  root.className = "tape-workspace-menu";
+  root.hidden = true;
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-label", "Workspaces");
+  const list = document.createElement("div");
+  list.className = "tape-group-menu-list";
+  const create = document.createElement("form");
+  const name = document.createElement("input");
+  name.type = "text";
+  name.name = "workspace";
+  name.placeholder = "New workspace";
+  name.setAttribute("aria-label", "New workspace name");
+  const add = document.createElement("button");
+  add.type = "submit";
+  add.textContent = "Create";
+  create.append(name, add);
+  create.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = name.value.trim();
+    if (!value) return;
+    name.value = "";
+    onCreate(value);
+  });
+  const renameForm = document.createElement("form");
+  const rename = document.createElement("input");
+  rename.type = "text";
+  rename.name = "rename";
+  rename.setAttribute("aria-label", "Rename workspace");
+  const renameButton = document.createElement("button");
+  renameButton.type = "submit";
+  renameButton.textContent = "Rename";
+  renameForm.append(rename, renameButton);
+  renameForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    onRename(rename.value);
+  });
+  const extras = document.createElement("div");
+  extras.className = "tape-workspace-files";
+  const exportButton = document.createElement("button");
+  exportButton.type = "button";
+  exportButton.textContent = "Export";
+  exportButton.addEventListener("click", onExport);
+  const importButton = document.createElement("button");
+  importButton.type = "button";
+  importButton.textContent = "Import";
+  importButton.addEventListener("click", onImport);
+  extras.append(exportButton, importButton);
+  root.append(list, create, renameForm, extras);
+  return { root, list, rename };
+}
+
 function markedText(title: string, marks: readonly number[]): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const marked = new Set(marks);
@@ -1698,20 +2169,20 @@ function buildSpotlight(): SpotlightShell {
   const input = document.createElement("input");
   input.type = "text";
   input.name = "spotlight";
-  input.placeholder = "Search panes";
+  input.placeholder = "Search panes and commands";
   input.setAttribute("role", "combobox");
   input.setAttribute("aria-autocomplete", "list");
   input.setAttribute("aria-expanded", "true");
   input.setAttribute("aria-controls", "tape-spotlight-list");
-  input.setAttribute("aria-label", "Search panes");
+  input.setAttribute("aria-label", "Search panes and commands");
   const list = document.createElement("ul");
   list.id = "tape-spotlight-list";
   list.className = "tape-spotlight-list";
   list.setAttribute("role", "listbox");
-  list.setAttribute("aria-label", "Panes");
+  list.setAttribute("aria-label", "Results");
   const empty = document.createElement("p");
   empty.className = "tape-spotlight-empty";
-  empty.textContent = "No matching panes";
+  empty.textContent = "Nothing matches";
   empty.hidden = true;
   form.append(input, list, empty);
   dialog.append(form);

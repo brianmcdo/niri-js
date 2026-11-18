@@ -29,7 +29,11 @@ export type ShortcutAction =
   | "home"
   | "overview"
   | "maximize"
-  | "spotlight";
+  | "spotlight"
+  | "closePane"
+  | "reopenPane"
+  | "historyBack"
+  | "historyForward";
 
 interface Binding {
   key: string;
@@ -69,6 +73,10 @@ const bindings: Record<ShortcutAction, Binding[]> = {
   overview: [mod("o")],
   maximize: [mod("m")],
   spotlight: [plain("k", { meta: true }), plain("k", { ctrl: true })],
+  closePane: [mod("w")],
+  reopenPane: [mod("w", { shift: true })],
+  historyBack: [plain("[", { meta: true }), plain("[", { ctrl: true })],
+  historyForward: [plain("]", { meta: true }), plain("]", { ctrl: true })],
   splitPlaneDown: [plain("}", { ctrl: true, shift: true }), plain("]", { ctrl: true, shift: true })],
   splitPlaneUp: [plain("{", { ctrl: true, shift: true }), plain("[", { ctrl: true, shift: true })],
 };
@@ -85,8 +93,8 @@ export interface ShortcutEvent {
 export function matchShortcut(event: ShortcutEvent): ShortcutAction | null {
   const keys = [event.key];
   if (event.altKey && /^Key[A-Z]$/.test(event.code)) keys.push(event.code.slice(3).toLowerCase());
-  if (event.altKey && event.code === "BracketRight") keys.push("]");
-  if (event.altKey && event.code === "BracketLeft") keys.push("[");
+  if ((event.altKey || event.metaKey || event.ctrlKey) && event.code === "BracketRight") keys.push("]");
+  if ((event.altKey || event.metaKey || event.ctrlKey) && event.code === "BracketLeft") keys.push("[");
   for (const [action, choices] of Object.entries(bindings) as [ShortcutAction, Binding[]][]) {
     for (const binding of choices) {
       if (

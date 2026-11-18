@@ -65,6 +65,14 @@ test("command-k and control-k open spotlight", () => {
   expect(matchShortcut(press("k", { metaKey: true, shiftKey: true }))).toBeNull();
 });
 
+test("close, reopen, and focus history have their own chords", () => {
+  expect(matchShortcut(press("w", { altKey: true }))).toBe("closePane");
+  expect(matchShortcut(press("w", { altKey: true, shiftKey: true }))).toBe("reopenPane");
+  expect(matchShortcut(press("[", { metaKey: true, code: "BracketLeft" }))).toBe("historyBack");
+  expect(matchShortcut(press("]", { ctrlKey: true, code: "BracketRight" }))).toBe("historyForward");
+  expect(matchShortcut(press("]", { ctrlKey: true, shiftKey: true, code: "BracketRight" }))).not.toBe("historyForward");
+});
+
 test("labels use the platform modifier and a plus between keys", () => {
   expect(shortcutLabel("overview", true)).toBe("⌥+O");
   expect(shortcutLabel("overview", false)).toBe("Alt+O");
@@ -73,4 +81,7 @@ test("labels use the platform modifier and a plus between keys", () => {
   expect(shortcutLabel("groupRight", false)).toBe("Ctrl+Alt+Shift+→");
   expect(shortcutLabel("spotlight", true)).toBe("⌘+K");
   expect(shortcutLabel("spotlight", false)).toBe("Ctrl+K");
+  expect(shortcutLabel("closePane", true)).toBe("⌥+W");
+  expect(shortcutLabel("historyBack", true)).toBe("⌘+[");
+  expect(shortcutLabel("historyForward", false)).toBe("Ctrl+]");
 });

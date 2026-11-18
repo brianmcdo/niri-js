@@ -44,6 +44,16 @@ export interface PaneContext {
   runtimeState: "live" | "frozen" | "hidden";
   presentationMode: "normal" | "overview" | "compact";
   props: Record<string, unknown>;
+  /** Send a message every pane can hear. */
+  emit: (type: string, detail?: unknown) => void;
+  /** Subscribe to messages. The returned function removes the listener. */
+  on: (type: string, listener: (event: PaneBusEvent) => void) => () => void;
+}
+
+export interface PaneBusEvent {
+  type: string;
+  detail: unknown;
+  sourceId: string;
 }
 
 export interface PaneHandle {

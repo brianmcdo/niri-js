@@ -321,8 +321,12 @@ test("storage restores serializable panes and drops the rest", async () => {
   first.destroy();
   open.pop();
 
-  const saved = JSON.parse(localStorage.getItem(key) ?? "{}") as { panes?: { paneId: string }[] };
-  expect(saved.panes?.map((item) => item.paneId)).toEqual(["guide", "clock", "extra"]);
+  const saved = JSON.parse(localStorage.getItem(key) ?? "{}") as {
+    activeId?: string;
+    workspaces?: { id: string; panes?: { paneId: string }[] }[];
+  };
+  const active = saved.workspaces?.find((item) => item.id === saved.activeId) ?? saved.workspaces?.[0];
+  expect(active?.panes?.map((item) => item.paneId)).toEqual(["guide", "clock", "extra"]);
 
   history.replaceState(null, "", "/?pane=extra");
   const second = create({ storageKey: key, panes: [pane("guide"), pane("clock")] });
@@ -398,8 +402,12 @@ test("panes join a named group and the chip walks through them", async () => {
 
   press("]", { altKey: true });
   expect(workspace.getLayout().cursor.column).toBe(0);
-  const saved = JSON.parse(localStorage.getItem("tape-test-groups") ?? "{}") as { layout?: { groups?: { name: string }[] } };
-  expect(saved.layout?.groups?.map((group) => group.name)).toEqual(["Studio"]);
+  const saved = JSON.parse(localStorage.getItem("tape-test-groups") ?? "{}") as {
+    activeId?: string;
+    workspaces?: { id: string; layout?: { groups?: { name: string }[] } }[];
+  };
+  const active = saved.workspaces?.find((item) => item.id === saved.activeId) ?? saved.workspaces?.[0];
+  expect(active?.layout?.groups?.map((group) => group.name)).toEqual(["Studio"]);
 });
 
 test("spotlight filters panes and jumps to the chosen one", async () => {
@@ -436,4 +444,176 @@ test("spotlight filters panes and jumps to the chosen one", async () => {
   expect(root().querySelector(".tape-spotlight-empty")?.hasAttribute("hidden")).toBe(false);
   press("Escape");
   expect(root().querySelector(".tape-spotlight") instanceof HTMLDialogElement && root().querySelector("dialog.tape-spotlight")?.hasAttribute("open")).toBe(false);
+});
+
+test("the command palette runs overview, and close can be undone", async () => {
+  const workspace = create({ panes: [pane("guide", "<p>welcome</p>"), pane("clock")] });
+  await flush();
+  press("k", { metaKey: true, code: "KeyK" });
+  const input = root().querySelector(".tape-spotlight input");
+  if (!(input instanceof HTMLInputElement)) throw new Error("spotlight has no field");
+  input.value = "overview";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  press("Enter");
+  expect(root().classList.contains("is-overview")).toBe(true);
+
+  press("Escape");
+  press("w", { altKey: true, code: "KeyW" });
+  expect(root().querySelector('[data-pane-id="guide"]')).toBeNull();
+  expect(workspace.getLayout().cursor.column).toBe(1);
+  press("w", { altKey: true, shiftKey: true, code: "KeyW" });
+  await flush();
+  expect(root().querySelector('[data-pane-id="guide"] p')?.textContent).toBe("welcome");
+  expect(workspace.getLayout().cursor).toEqual({ plane: 0, column: 0, row: 0 });
+});
+
+test("focus history returns to the pane that was left", async () => {
+  const workspace = create({ panes: [pane("guide"), pane("clock"), pane("ledger")] });
+  await flush();
+  press("ArrowRight", { altKey: true });
+  press("ArrowRight", { altKey: true });
+  press("[", { metaKey: true, code: "BracketLeft" });
+  expect(workspace.getLayout().cursor.column).toBe(1);
+  press("]", { metaKey: true, code: "BracketRight" });
+  expect(workspace.getLayout().cursor.column).toBe(2);
+});
+
+test("panes can send each other a message", async () => {
+  const heard: string[] = [];
+  create({
+    panes: [
+      {
+        paneId: "sender",
+        title: "Sender",
+        surfaceKind: "mount",
+        source: {
+          kind: "mount",
+          mount(host, context) {
+            const button = document.createElement("button");
+            button.textContent = "Ping";
+            button.addEventListener("click", () => context.emit("ping", "hello"));
+            host.append(button);
+          },
+        },
+      },
+      {
+        paneId: "listener",
+        title: "Listener",
+        surfaceKind: "mount",
+        source: {
+          kind: "mount",
+          mount(host, context) {
+            context.on("ping", (event) => {
+              heard.push(String(event.detail));
+              host.dataset.heard = String(event.detail);
+            });
+          },
+        },
+      },
+    ],
+  });
+  await flush();
+  const ping = [...root().querySelectorAll("button")].find((item) => item.textContent === "Ping");
+  if (!(ping instanceof HTMLButtonElement)) throw new Error("Ping was not mounted");
+  ping.click();
+  expect(heard).toEqual(["hello"]);
+  expect(root().querySelector("[data-pane-id='listener'] .tape-pane-body")?.getAttribute("data-heard")).toBe("hello");
+});
+
+test("a named workspace keeps its own strip", async () => {
+  const workspace = create({
+    storageKey: "tape-test-spaces",
+    panes: [pane("guide"), pane("clock")],
+  });
+  await flush();
+  button("Workspace").click();
+  const name = root().querySelector<HTMLInputElement>('input[name="workspace"]');
+  if (!name) throw new Error("workspace menu has no name field");
+  name.value = "Writing";
+  name.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await flush();
+  expect(root().querySelector('[data-pane-id="guide"]')).not.toBeNull();
+  workspace.openPane(pane("notes", "<p>draft</p>"));
+  await flush();
+
+  button("Workspace").click();
+  const main = [...root().querySelectorAll(".tape-workspace-menu button")].find((item) => item.textContent === "Main");
+  if (!(main instanceof HTMLButtonElement)) throw new Error("Main is not listed");
+  main.click();
+  await flush();
+  expect(root().querySelector('[data-pane-id="notes"]')).toBeNull();
+  expect(root().querySelectorAll(".tape-pane")).toHaveLength(2);
+
+  button("Workspace").click();
+  const writing = [...root().querySelectorAll(".tape-workspace-menu button")].find((item) => item.textContent === "Writing");
+  if (!(writing instanceof HTMLButtonElement)) throw new Error("Writing is not listed");
+  writing.click();
+  await flush();
+  expect(root().querySelector('[data-pane-id="notes"] p')?.textContent).toBe("draft");
+
+  const saved = JSON.parse(localStorage.getItem("tape-test-spaces") ?? "{}") as {
+    workspaces?: { name: string }[];
+  };
+  expect(saved.workspaces?.map((item) => item.name).sort()).toEqual(["Main", "Writing"]);
+});
+
+test("an older single-strip save still opens", async () => {
+  const key = "tape-test-schema-1";
+  const layout = {
+    schema: 1,
+    workspaceId: "tape",
+    planes: [{ index: 0, columns: [{ index: 0, widthPx: 640, cells: [{ paneId: "guide", reserved: false, weight: 1 }] }] }],
+    cursor: { plane: 0, column: 0, row: 0 },
+    homePaneId: "guide",
+    maximizedPaneId: null,
+  };
+  localStorage.setItem(key, JSON.stringify({ schema: 1, layout, panes: [pane("guide", "<p>kept</p>")] }));
+  create({ storageKey: key, panes: [pane("guide", "<p>fresh</p>")] });
+  await flush();
+  expect(root().querySelector('[data-pane-id="guide"] p')?.textContent).toBe("kept");
+});
+
+test("import replaces the current strip", async () => {
+  const workspace = create({ panes: [pane("guide"), pane("clock")] });
+  await flush();
+  const file = new File(
+    [
+      JSON.stringify({
+        schema: 2,
+        activeId: "imported",
+        workspaces: [
+          {
+            id: "imported",
+            name: "Imported",
+            layout: {
+              schema: 1,
+              workspaceId: "imported",
+              planes: [
+                {
+                  index: 0,
+                  columns: [{ index: 0, widthPx: 640, cells: [{ paneId: "notes", reserved: false, weight: 1 }] }],
+                },
+              ],
+              cursor: { plane: 0, column: 0, row: 0 },
+              homePaneId: "notes",
+              maximizedPaneId: null,
+              groups: [],
+            },
+            panes: [pane("notes", "<p>imported</p>")],
+          },
+        ],
+        closed: [],
+      }),
+    ],
+    "layout.json",
+    { type: "application/json" },
+  );
+  const input = root().querySelector('input[type="file"]');
+  if (!(input instanceof HTMLInputElement)) throw new Error("import input is missing");
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  await flush();
+  expect(workspace.getLayout().planes[0]?.columns).toHaveLength(1);
+  expect(root().querySelector('[data-pane-id="notes"] p')?.textContent).toBe("imported");
+  expect(root().querySelector('[data-pane-id="guide"]')).toBeNull();
 });

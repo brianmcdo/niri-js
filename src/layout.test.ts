@@ -14,6 +14,7 @@ import {
   moveColumn,
   movePane,
   openPane,
+  openPaneAt,
   paneIds,
   relocatePane,
   removeBlank,
@@ -77,6 +78,18 @@ describe("layout", () => {
     const right = scene.boxes.find((box) => box.paneId === "d");
     const left = scene.boxes.find((box) => box.paneId === "a");
     expect(right && left && right.x > left.x + left.width).toBe(true);
+  });
+
+  test("a pane returns to the cell it left", () => {
+    const removed = closePane(tape(), "a");
+    const restored = openPaneAt(removed, "a", { plane: 0, column: 0, row: 0 }, 500);
+    const column = restored.planes[0]?.columns.find((item) => item.index === 0);
+    expect(column?.cells[0]?.paneId).toBe("a");
+    expect(restored.cursor).toEqual({ plane: 0, column: 0, row: 0 });
+
+    const stacked = openPaneAt(closePane(tape(), "b"), "b", { plane: 0, column: 1, row: 0 }, 500);
+    const cells = stacked.planes[0]?.columns.find((item) => item.index === 1)?.cells.map((cell) => cell.paneId);
+    expect(cells).toEqual(["b", "c"]);
   });
 
   test("focus steps into the empty cell instead of skipping to the next pane", () => {

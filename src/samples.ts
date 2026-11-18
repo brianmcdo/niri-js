@@ -60,14 +60,17 @@ function guideHtml(): string {
     ["home", "Return to the first pane"],
     ["editGroup", "Put this pane in a named group"],
     ["groupNext", "Move to the next pane in that group"],
-    ["spotlight", "Search every pane and jump to it"],
+    ["spotlight", "Search panes, commands, and workspaces"],
+    ["closePane", "Close the focused pane"],
+    ["reopenPane", "Reopen the pane you just closed"],
+    ["historyBack", "Return to the pane you came from"],
   ];
   const items = [
     `<dt>${apple ? "⌥" : "Alt"}+arrows</dt><dd>Move to the neighboring cell, including an empty one. H J K L work too.</dd>`,
     ...rows.map(([action, description]) => `<dt>${shortcutLabel(action, apple)}</dt><dd>${description}</dd>`),
   ].join("");
   return `<article class="guide">
-    <p class="guide-kicker">Scrolling tape</p>
+    <p class="guide-kicker">niri-js</p>
     <h2>Panes keep their size. The stage scrolls to them.</h2>
     <p>Each column is a strip of the workspace. Splitting or opening a pane adds a cell beside the others instead of squeezing them. Alt is the modifier, Option on a Mac. Drag a title to rearrange, or drag the right and bottom edges to resize.</p>
     <p>The panes beside this one are a custom element, a React ledger, a Vue palette, and a Svelte list. New pane can load any of those, plus a module URL that exports <code>mount(host, context)</code>.</p>
