@@ -116,6 +116,18 @@ test("buttons and option-arrow keys move focus and the pane link", async () => {
   press("ArrowLeft", { altKey: true });
   expect(workspace.getLayout().cursor.column).toBe(0);
   expect(location.search).toBe("?pane=guide");
+
+  const stage = root().querySelector(".tape-stage");
+  const option = new KeyboardEvent("keydown", {
+    key: "Process",
+    code: "ArrowRight",
+    altKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  stage?.dispatchEvent(option);
+  expect(option.defaultPrevented).toBe(true);
+  expect(workspace.getLayout().cursor.column).toBe(1);
 });
 
 test("a keypress inside a field does not move the workspace", async () => {
@@ -139,6 +151,18 @@ test("opening a pane inserts a column and suffixes a duplicate id", async () => 
   expect(workspace.getLayout().cursor.column).toBe(1);
   expect(root().querySelector('[data-pane-id="guide-2"] p')?.textContent).toBe("again");
   expect(changes.at(-1)).toBe(2);
+});
+
+test("option-w removes a blank column and returns to the pane", async () => {
+  const workspace = create({ panes: [pane("guide"), pane("clock")] });
+  await flush();
+  press("Enter", { ctrlKey: true, shiftKey: true });
+  expect(workspace.getLayout().planes[0]?.columns).toHaveLength(3);
+  expect(root().querySelector(".tape-status")?.textContent).toContain("Empty cell");
+  press("w", { altKey: true, code: "KeyW" });
+  expect(workspace.getLayout().planes[0]?.columns).toHaveLength(2);
+  expect(workspace.getLayout().cursor).toEqual({ plane: 0, column: 1, row: 0 });
+  expect(root().querySelector(".tape-ghost")).toBeNull();
 });
 
 test("closing the focused pane leaves the neighbor focused", async () => {

@@ -80,7 +80,7 @@ Alt (Option on a Mac) is the modifier.
 | Alt+] / Alt+[ | Next or previous pane in the group |
 | Alt+Shift+Home | Return to the first pane |
 | Command+K or Ctrl+K | Search panes, commands, and workspaces |
-| Alt+W | Close the focused pane |
+| Alt+W | Close the focused pane, or remove the blank cell you are on |
 | Alt+Shift+W | Reopen the last closed pane |
 | Command+[ or Ctrl+[ | Back to the previous pane |
 | Command+] or Ctrl+] | Forward again |

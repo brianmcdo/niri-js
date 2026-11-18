@@ -17,6 +17,8 @@ test("alt arrows focus and ctrl+alt arrows move", () => {
   expect(matchShortcut(press("ArrowRight", { altKey: true }))).toBe("focusRight");
   expect(matchShortcut(press("l", { altKey: true }))).toBe("focusRight");
   expect(matchShortcut(press("ArrowLeft", { altKey: true, ctrlKey: true }))).toBe("moveLeft");
+  expect(matchShortcut(press("Process", { code: "ArrowLeft", altKey: true }))).toBe("focusLeft");
+  expect(matchShortcut(press("Unidentified", { code: "ArrowDown", altKey: true }))).toBe("focusDown");
 });
 
 test("option on an apple keyboard still matches the letter shortcut", () => {

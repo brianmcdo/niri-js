@@ -100,8 +100,9 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
   outline: none;
+  background-color: var(--bg);
   background-image: radial-gradient(rgba(246, 241, 234, 0.14) 1px, transparent 1px);
   background-size: 22px 22px;
   background-position: -10px -10px;

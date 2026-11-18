@@ -17,6 +17,7 @@ import {
   openPaneAt,
   paneIds,
   relocatePane,
+  dismissBlank,
   removeBlank,
   resizeColumn,
   resizeSplit,
@@ -180,6 +181,25 @@ describe("layout", () => {
     const removed = removeBlank({ ...stacked, cursor: { plane: 0, column: 0, row: 0 } }, "down");
     expect(removed.planes[0]!.columns.find((item) => item.index === 0)!.cells).toHaveLength(1);
     expect(removeBlank(tape(), "down")).toEqual(tape());
+  });
+
+  test("option-w removes the blank column or row you are on", () => {
+    const column = dismissBlank(splitBlank(tape(), "right", 500));
+    expect(column.planes[0]!.columns.map((item) => item.index)).toEqual([0, 1, 2]);
+    expect(column.cursor).toEqual({ plane: 0, column: 1, row: 0 });
+    const row = dismissBlank(splitBlank(tape(), "down", 500));
+    expect(row.planes[0]!.columns.find((item) => item.index === 0)!.cells.map((cell) => cell.paneId)).toEqual(["a"]);
+    const runway = dismissBlank(focusBy(tape(), -1, 0, 1));
+    expect(runway.cursor).toEqual({ plane: 0, column: 0, row: 0 });
+    expect(runway.planes[0]!.columns).toHaveLength(3);
+    const focused = tape();
+    expect(dismissBlank(focused)).toBe(focused);
+    const moved = movePane(tape(), -1, 0, 500);
+    const hole = { ...moved, cursor: { plane: 0, column: 0, row: 0 } };
+    const closed = dismissBlank(hole);
+    const scene = measure(closed, { width: 1200, height: 800 }, options);
+    expect(scene.boxes.some((box) => box.paneId === null)).toBe(false);
+    expect(closed.planes[0]!.columns.map((item) => item.index).sort((left, right) => left - right)).toEqual([-1, 0, 1]);
   });
 
   test("dropping a pane swaps with an occupied cell and adopts a free index", () => {

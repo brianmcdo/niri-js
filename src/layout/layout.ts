@@ -353,6 +353,42 @@ export function splitBlank(layout: Layout, direction: "right" | "down" | "up", c
   return next;
 }
 
+/** Remove the focused blank cell. An empty column, including a hole between columns, closes up. */
+export function dismissBlank(layout: Layout): Layout {
+  const plane = planeAt(layout, layout.cursor.plane);
+  const column = plane ? columnAt(plane, layout.cursor.column) : undefined;
+  const cellItem = column?.cells[layout.cursor.row];
+  if (cellItem?.paneId) return layout;
+  const next = clone(layout);
+  const nextPlane = planeAt(next, layout.cursor.plane);
+  const nextColumn = nextPlane ? columnAt(nextPlane, layout.cursor.column) : undefined;
+  if (nextColumn && !nextColumn.cells[layout.cursor.row]?.paneId) {
+    const removedIndex = nextColumn.index;
+    nextColumn.cells.splice(layout.cursor.row, 1);
+    if (nextColumn.cells.length === 0 && nextPlane) {
+      nextPlane.columns = nextPlane.columns.filter((item) => item !== nextColumn);
+      shiftColumns(nextPlane, removedIndex + 1, -1);
+    }
+    next.planes = next.planes.filter((item) => item.columns.length > 0);
+    next.cursor = neighborCursor(next, layout.cursor);
+    return next;
+  }
+  if (nextPlane && closeColumnHole(nextPlane, layout.cursor.column)) {
+    next.cursor = neighborCursor(next, layout.cursor);
+    return next;
+  }
+  const cursor = neighborCursor(next, next.cursor);
+  if (
+    cursor.plane === layout.cursor.plane &&
+    cursor.column === layout.cursor.column &&
+    cursor.row === layout.cursor.row
+  ) {
+    return layout;
+  }
+  next.cursor = cursor;
+  return next;
+}
+
 export function removeBlank(layout: Layout, direction: "up" | "down"): Layout {
   const next = clone(layout);
   const column = columnAt(planeAt(next, next.cursor.plane), next.cursor.column);
@@ -702,6 +738,16 @@ function ensurePlane(layout: Layout, index: number): Plane {
 
 function columnAt(plane: Plane | undefined, index: number): Column | undefined {
   return plane?.columns.find((column) => column.index === index);
+}
+
+/** Pull later columns into a missing index so the strip no longer draws an empty slot there. */
+function closeColumnHole(plane: Plane, index: number): boolean {
+  const indexes = plane.columns.map((column) => column.index);
+  if (indexes.length === 0 || indexes.includes(index)) return false;
+  const nextReal = indexes.filter((item) => item > index).sort((left, right) => left - right)[0];
+  if (nextReal === undefined || !indexes.some((item) => item < index)) return false;
+  shiftColumns(plane, nextReal, index - nextReal);
+  return true;
 }
 
 function shiftColumns(plane: Plane, at: number, delta: number): void {

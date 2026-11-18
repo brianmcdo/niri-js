@@ -92,6 +92,8 @@ export interface ShortcutEvent {
 
 export function matchShortcut(event: ShortcutEvent): ShortcutAction | null {
   const keys = [event.key];
+  // macOS reports Option+arrow as an IME key (`Process` / keyCode 229). `code` still names the arrow.
+  if (/^(Arrow(?:Left|Right|Up|Down)|Home|End)$/.test(event.code)) keys.push(event.code);
   if (event.altKey && /^Key[A-Z]$/.test(event.code)) keys.push(event.code.slice(3).toLowerCase());
   if ((event.altKey || event.metaKey || event.ctrlKey) && event.code === "BracketRight") keys.push("]");
   if ((event.altKey || event.metaKey || event.ctrlKey) && event.code === "BracketLeft") keys.push("[");

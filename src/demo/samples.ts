@@ -65,7 +65,7 @@ function guideHtml(): string {
     ["editGroup", "Put this pane in a named group"],
     ["groupNext", "Move to the next pane in that group"],
     ["spotlight", "Search panes, commands, and workspaces"],
-    ["closePane", "Close the focused pane"],
+    ["closePane", "Close the focused pane, or remove the blank cell you are on"],
     ["reopenPane", "Reopen the pane you just closed"],
     ["historyBack", "Return to the pane you came from"],
   ];

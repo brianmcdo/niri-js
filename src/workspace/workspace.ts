@@ -5,6 +5,7 @@ import {
   createLayout,
   cursorBox,
   defaultColumnWidth,
+  dismissBlank,
   findCursor,
   focusBy,
   focusEdge,
@@ -207,7 +208,7 @@ export class TapeWorkspace {
     this.root = document.createElement("div");
     this.root.className = "tape";
     this.root.dataset.tapeRoot = "";
-    this.root.addEventListener("keydown", this.onKey);
+    window.addEventListener("keydown", this.onKey, true);
 
     const bar = document.createElement("header");
     bar.className = "tape-bar";
@@ -344,6 +345,7 @@ export class TapeWorkspace {
 
   destroy(): void {
     this.onResize.disconnect();
+    window.removeEventListener("keydown", this.onKey, true);
     window.removeEventListener("pointermove", this.onPointerMove);
     window.removeEventListener("pointerup", this.onPointerUp);
     window.removeEventListener("pointercancel", this.onPointerUp);
@@ -563,8 +565,7 @@ export class TapeWorkspace {
         node.hidden = this.compact || maximized;
         const cursor = sameCursor(box, this.layout.cursor);
         node.classList.toggle("is-cursor", cursor);
-        const add = node.querySelector("button");
-        if (add instanceof HTMLButtonElement) add.hidden = !cursor;
+        for (const button of node.querySelectorAll("button")) button.hidden = !cursor;
         ghost += 1;
       }
     }
@@ -665,7 +666,16 @@ export class TapeWorkspace {
       this.apply(focusByCursor(this.layout, cursor));
       this.openDialog();
     });
-    ghost.append(label, add);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.title = `Remove this blank cell (${shortcutLabel("closePane", apple)})`;
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const cursor = readCursor(ghost);
+      this.apply(dismissBlank(focusByCursor(this.layout, cursor)));
+    });
+    ghost.append(label, add, remove);
     return ghost;
   }
 
@@ -918,6 +928,7 @@ export class TapeWorkspace {
   }
 
   private handleKey(event: KeyboardEvent): void {
+    if (!(event.target instanceof Node) || !this.root.contains(event.target)) return;
     if (this.dialog.open) {
       if (event.key === "Escape") this.closeDialog();
       return;
@@ -965,6 +976,8 @@ export class TapeWorkspace {
       return;
     }
     if (editable) return;
+    // Option+arrow otherwise scrolls the focused stage. That scroll, not the camera, is the white area.
+    if (event.altKey && /^(Arrow(?:Left|Right|Up|Down)|Home|End)$/.test(event.code)) event.preventDefault();
     const action = matchShortcut(event);
     if (!action) return;
     event.preventDefault();
@@ -1498,6 +1511,11 @@ export class TapeWorkspace {
   }
 
   private closeFocused(): void {
+    const next = dismissBlank(this.layout);
+    if (next !== this.layout) {
+      this.apply(next);
+      return;
+    }
     const id = paneAt(this.layout);
     if (id) this.closePane(id);
   }
@@ -1547,7 +1565,7 @@ export class TapeWorkspace {
   private paletteEntries() {
     const commands: { id: string; title: string; keywords: string; shortcut?: ShortcutAction }[] = [
       { id: "new-pane", title: "New pane", keywords: "open create load" },
-      { id: "close-pane", title: "Close pane", keywords: "remove delete", shortcut: "closePane" },
+      { id: "close-pane", title: "Close pane", keywords: "remove delete blank empty", shortcut: "closePane" },
       { id: "reopen-pane", title: "Reopen closed pane", keywords: "undo restore", shortcut: "reopenPane" },
       { id: "back", title: "Back", keywords: "history previous", shortcut: "historyBack" },
       { id: "forward", title: "Forward", keywords: "history next", shortcut: "historyForward" },
