@@ -27,8 +27,11 @@ Alt (Option on a Mac) is the modifier.
 | Alt+O | Overview. Scroll to zoom, drag the background to pan |
 | Alt+M | Maximize |
 | Alt+Shift+G | Select the column, then Alt+Ctrl+arrows move it |
+| Alt+G | Group the focused pane. Click the group to walk its panes |
+| Alt+] / Alt+[ | Next or previous pane in the group |
 | Alt+Shift+Home | Return to the first pane |
-| Escape | Leave overview, the column selection, or maximize |
+| Command+K or Ctrl+K | Search panes and jump to one |
+| Escape | Leave overview, the column selection, maximize, or search |
 
 Drag a title bar to drop a pane on another cell. Drag the right edge to resize a column, or the bottom edge to resize a split.
 

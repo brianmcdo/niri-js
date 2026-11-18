@@ -48,6 +48,9 @@ test("the remaining bindings map to one action each", () => {
     [press("Home", { altKey: true, ctrlKey: true, shiftKey: true }), "removeBlankUp"],
     [press("End", { altKey: true, ctrlKey: true, shiftKey: true }), "removeBlankDown"],
     [press("g", { altKey: true, shiftKey: true }), "selectGroup"],
+    [press("g", { altKey: true }), "editGroup"],
+    [press("]", { altKey: true }), "groupNext"],
+    [press("‘", { code: "BracketLeft", altKey: true }), "groupPrev"],
     [press("Home", { altKey: true, shiftKey: true }), "home"],
     [press("m", { altKey: true }), "maximize"],
     [press("}", { ctrlKey: true, shiftKey: true }), "splitPlaneDown"],
@@ -56,10 +59,18 @@ test("the remaining bindings map to one action each", () => {
   for (const [event, action] of cases) expect(matchShortcut(event)).toBe(action);
 });
 
+test("command-k and control-k open spotlight", () => {
+  expect(matchShortcut(press("k", { metaKey: true }))).toBe("spotlight");
+  expect(matchShortcut(press("k", { ctrlKey: true }))).toBe("spotlight");
+  expect(matchShortcut(press("k", { metaKey: true, shiftKey: true }))).toBeNull();
+});
+
 test("labels use the platform modifier and a plus between keys", () => {
   expect(shortcutLabel("overview", true)).toBe("⌥+O");
   expect(shortcutLabel("overview", false)).toBe("Alt+O");
   expect(shortcutLabel("splitRight", false)).toBe("Ctrl+Shift+Enter");
   expect(shortcutLabel("focusLeft", true)).toBe("⌥+←");
   expect(shortcutLabel("groupRight", false)).toBe("Ctrl+Alt+Shift+→");
+  expect(shortcutLabel("spotlight", true)).toBe("⌘+K");
+  expect(shortcutLabel("spotlight", false)).toBe("Ctrl+K");
 });

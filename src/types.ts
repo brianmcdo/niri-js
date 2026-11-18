@@ -1,4 +1,6 @@
 /** A pane the workspace can mount. `mount` sources stay in memory and are not saved. */
+import type { PaneGroup } from "./groups.ts";
+
 export type PaneSource =
   | { kind: "html"; html: string }
   | { kind: "element"; tag: string; props?: Record<string, unknown> }
@@ -85,6 +87,8 @@ export interface Layout {
   cursor: Cursor;
   homePaneId: string | null;
   maximizedPaneId: string | null;
+  /** Named sets of panes. A pane belongs to at most one group. */
+  groups: PaneGroup[];
 }
 
 export interface Box {

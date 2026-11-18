@@ -23,9 +23,13 @@ export type ShortcutAction =
   | "removeBlankUp"
   | "removeBlankDown"
   | "selectGroup"
+  | "editGroup"
+  | "groupNext"
+  | "groupPrev"
   | "home"
   | "overview"
-  | "maximize";
+  | "maximize"
+  | "spotlight";
 
 interface Binding {
   key: string;
@@ -58,9 +62,13 @@ const bindings: Record<ShortcutAction, Binding[]> = {
   removeBlankUp: [mod("Home", { ctrl: true, shift: true })],
   removeBlankDown: [mod("End", { ctrl: true, shift: true })],
   selectGroup: [mod("g", { shift: true })],
+  editGroup: [mod("g")],
+  groupNext: [mod("]")],
+  groupPrev: [mod("[")],
   home: [mod("Home", { shift: true })],
   overview: [mod("o")],
   maximize: [mod("m")],
+  spotlight: [plain("k", { meta: true }), plain("k", { ctrl: true })],
   splitPlaneDown: [plain("}", { ctrl: true, shift: true }), plain("]", { ctrl: true, shift: true })],
   splitPlaneUp: [plain("{", { ctrl: true, shift: true }), plain("[", { ctrl: true, shift: true })],
 };
@@ -77,6 +85,8 @@ export interface ShortcutEvent {
 export function matchShortcut(event: ShortcutEvent): ShortcutAction | null {
   const keys = [event.key];
   if (event.altKey && /^Key[A-Z]$/.test(event.code)) keys.push(event.code.slice(3).toLowerCase());
+  if (event.altKey && event.code === "BracketRight") keys.push("]");
+  if (event.altKey && event.code === "BracketLeft") keys.push("[");
   for (const [action, choices] of Object.entries(bindings) as [ShortcutAction, Binding[]][]) {
     for (const binding of choices) {
       if (
@@ -94,7 +104,8 @@ export function matchShortcut(event: ShortcutEvent): ShortcutAction | null {
 }
 
 export function shortcutLabel(action: ShortcutAction, apple: boolean): string {
-  const binding = bindings[action][0];
+  const choices = bindings[action];
+  const binding = (apple ? choices.find((item) => item.meta) : choices.find((item) => !item.meta)) ?? choices[0];
   if (!binding) return "";
   const parts = [
     binding.ctrl ? (apple ? "⌃" : "Ctrl") : "",

@@ -9,6 +9,7 @@ import type {
   Viewport,
 } from "./types.ts";
 import { LAYOUT_SCHEMA } from "./types.ts";
+import { forgetPane, normalizeGroups } from "./groups.ts";
 
 export interface MeasureOptions {
   gap: number;
@@ -52,6 +53,7 @@ export function createLayout(
     cursor: { plane: 0, column: 0, row: 0 },
     homePaneId: first,
     maximizedPaneId: null,
+    groups: [],
   };
 }
 
@@ -90,6 +92,8 @@ export function assertLayout(value: unknown): asserts value is Layout {
     }
   }
   assertCursor(layout.cursor);
+  const layoutWithGroups = layout as Layout;
+  layoutWithGroups.groups = normalizeGroups(layout.groups, seen);
 }
 
 export function paneIds(layout: Layout): string[] {
@@ -162,6 +166,7 @@ export function closePane(layout: Layout, paneId: string): Layout {
   next.planes = next.planes.filter((plane) => plane.columns.length > 0);
   if (next.maximizedPaneId === paneId) next.maximizedPaneId = null;
   if (next.homePaneId === paneId) next.homePaneId = paneIds(next)[0] ?? null;
+  next.groups = forgetPane(next.groups, paneId);
   if (focusedId && focusedId !== paneId) {
     const cursor = findCursor(next, focusedId);
     if (cursor) next.cursor = cursor;

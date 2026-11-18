@@ -1,6 +1,7 @@
 import { shortcutLabel, type ShortcutAction } from "./shortcuts.ts";
 import type { PaneDefinition } from "./types.ts";
 import type { SeedColumn } from "./layout.ts";
+import type { PaneGroup } from "./groups.ts";
 
 const apple =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
@@ -10,6 +11,10 @@ export const sampleColumns: SeedColumn[] = [
   { paneIds: ["clock"] },
   { paneIds: ["ledger"] },
   { paneIds: ["palette", "notes"] },
+];
+
+export const sampleGroups: PaneGroup[] = [
+  { id: "reference", name: "Reference", color: "#7aa2d6", paneIds: ["palette", "notes"] },
 ];
 
 export function samplePanes(): PaneDefinition[] {
@@ -53,6 +58,9 @@ function guideHtml(): string {
     ["maximize", "Fill the stage with the focused pane"],
     ["selectGroup", "Select the whole column, then move it with Ctrl"],
     ["home", "Return to the first pane"],
+    ["editGroup", "Put this pane in a named group"],
+    ["groupNext", "Move to the next pane in that group"],
+    ["spotlight", "Search every pane and jump to it"],
   ];
   const items = [
     `<dt>${apple ? "⌥" : "Alt"}+arrows</dt><dd>Move to the neighboring cell, including an empty one. H J K L work too.</dd>`,

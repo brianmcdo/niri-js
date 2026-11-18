@@ -28,6 +28,18 @@ import {
 import type { SeedColumn } from "./layout.ts";
 import { assertLayout } from "./layout.ts";
 import { matchShortcut, shortcutLabel, type ShortcutAction } from "./shortcuts.ts";
+import { searchPanes, type SpotlightHit } from "./spotlight.ts";
+import {
+  addPaneToGroup,
+  assignPane,
+  cycleMember,
+  groupOf,
+  normalizeGroups,
+  orderedMembers,
+  ungroupPane,
+  withGroups,
+  type PaneGroup,
+} from "./groups.ts";
 import type { Box, Cursor, Layout, PaneContext, PaneDefinition, PaneHandle, PaneSource, Scene } from "./types.ts";
 
 export interface TapeWorkspaceOptions {
@@ -45,6 +57,8 @@ export interface TapeWorkspaceOptions {
   gap?: number;
   padding?: number;
   paneLink?: boolean;
+  /** Groups restored by Reset, alongside the original panes. */
+  groups?: PaneGroup[];
   onLayoutChange?: (layout: Layout) => void;
 }
 
@@ -52,6 +66,7 @@ interface Shell {
   root: HTMLElement;
   body: HTMLElement;
   title: HTMLElement;
+  group: HTMLButtonElement;
   bottom: HTMLElement;
 }
 
@@ -81,6 +96,18 @@ export class TapeWorkspace {
   private readonly minimapWorld: HTMLElement;
   private readonly minimapView: HTMLElement;
   private readonly dialog: HTMLDialogElement;
+  private readonly groupBar: HTMLElement;
+  private readonly groupMenu: HTMLElement;
+  private readonly groupMenuList: HTMLElement;
+  private readonly groupMenuTitle: HTMLElement;
+  private readonly groupMenuRemove: HTMLButtonElement;
+  private readonly groupMenuInput: HTMLInputElement;
+  private readonly spotlight: HTMLDialogElement;
+  private readonly spotlightInput: HTMLInputElement;
+  private readonly spotlightList: HTMLUListElement;
+  private readonly spotlightEmpty: HTMLParagraphElement;
+  private spotlightIndex = 0;
+  private spotlightHits: SpotlightHit[] = [];
   private readonly overviewButton: HTMLButtonElement;
   private readonly options: Required<
     Pick<
@@ -111,6 +138,8 @@ export class TapeWorkspace {
   private overviewZoom = 1;
   private overviewPan = { x: 0, y: 0 };
   private group = false;
+  private activeGroupId: string | null = null;
+  private groupMenuPaneId: string | null = null;
   private compact = false;
   private resizing = false;
   private snapNext = true;
@@ -156,10 +185,14 @@ export class TapeWorkspace {
 
     const bar = document.createElement("header");
     bar.className = "tape-bar";
-    bar.append(mark(), hint(apple));
+    this.groupBar = document.createElement("div");
+    this.groupBar.className = "tape-groups";
+    bar.append(mark(), hint(apple), this.groupBar);
     const actions = document.createElement("div");
     actions.className = "tape-bar-actions";
     actions.append(
+      command("Search", label("spotlight", "Search panes"), () => this.openSpotlight()),
+      command("Group", label("editGroup", "Group the focused pane"), () => this.openGroupMenu()),
       command("Reset", "Restore the original panes", () => this.reset()),
       command("New pane", "Load a component into a pane", () => this.openDialog()),
     );
@@ -220,9 +253,35 @@ export class TapeWorkspace {
       },
       () => this.closeDialog(),
     );
+    const spotlight = buildSpotlight();
+    this.spotlight = spotlight.dialog;
+    this.spotlightInput = spotlight.input;
+    this.spotlightList = spotlight.list;
+    this.spotlightEmpty = spotlight.empty;
+    this.spotlightInput.addEventListener("input", () => {
+      this.spotlightIndex = 0;
+      this.renderSpotlight();
+    });
+    this.spotlight.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      this.closeSpotlight();
+    });
+    spotlight.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.chooseSpotlight();
+    });
+    const menu = buildGroupMenu(
+      () => this.ungroupMenuPane(),
+      (name) => this.createMenuGroup(name),
+    );
+    this.groupMenu = menu.root;
+    this.groupMenuList = menu.list;
+    this.groupMenuTitle = menu.title;
+    this.groupMenuRemove = menu.remove;
+    this.groupMenuInput = menu.input;
 
     this.stage.append(this.world, this.minimap, controls);
-    this.root.append(bar, this.stage, this.status, this.dialog);
+    this.root.append(bar, this.groupMenu, this.stage, this.status, this.dialog, this.spotlight);
     container.replaceChildren(this.root);
 
     this.stage.addEventListener("pointerdown", this.onPointerDown);
@@ -295,6 +354,8 @@ export class TapeWorkspace {
     if (this.options.storageKey) localStorage.removeItem(this.options.storageKey);
     this.overview = false;
     this.group = false;
+    this.activeGroupId = null;
+    this.closeGroupMenu();
     this.useInitial();
     this.snapNext = true;
     this.clearShells();
@@ -359,6 +420,9 @@ export class TapeWorkspace {
       this.initialColumns,
       defaultColumnWidth(this.viewport.width || window.innerWidth),
     );
+    if (this.options.groups?.length) {
+      this.layout.groups = normalizeGroups(this.options.groups, new Set(paneIds(this.layout)));
+    }
   }
 
   private readStorage(): { layout: Layout; panes: PaneDefinition[] } | null {
@@ -418,6 +482,14 @@ export class TapeWorkspace {
           this.group && box.plane === this.layout.cursor.plane && box.column === this.layout.cursor.column,
         );
         shell.root.classList.toggle("is-drop", this.dropKey === boxKey(box));
+        const membership = groupOf(this.layout.groups, box.paneId);
+        const showing = this.activeGroupId !== null && membership?.id === this.activeGroupId;
+        shell.root.classList.toggle("in-group", showing);
+        if (membership) shell.root.style.setProperty("--pane-group", membership.color);
+        else shell.root.style.removeProperty("--pane-group");
+        shell.group.hidden = !membership && focusedId !== box.paneId;
+        shell.group.textContent = membership?.name ?? "Group";
+        shell.group.title = membership ? `Group: ${membership.name}` : "Add to a group";
         shell.bottom.hidden = !this.hasSplitBelow(box) || this.compact || maximized || this.overview;
         const pane = this.panes.get(box.paneId);
         if (pane) shell.title.textContent = pane.title;
@@ -451,6 +523,12 @@ export class TapeWorkspace {
     this.root.classList.toggle("is-overview", this.overview);
     this.root.classList.toggle("is-compact", this.compact);
     this.root.classList.toggle("is-maximized", maximized);
+    if (this.activeGroupId && !this.layout.groups.some((group) => group.id === this.activeGroupId)) {
+      this.activeGroupId = null;
+    }
+    this.root.classList.toggle("is-grouped", this.activeGroupId !== null);
+    this.paintGroupBar();
+    if (!this.groupMenu.hidden) this.paintGroupMenu();
     this.overviewButton.setAttribute("aria-pressed", String(this.overview));
     this.retarget();
     this.kick();
@@ -476,13 +554,21 @@ export class TapeWorkspace {
     const title = document.createElement("h2");
     title.className = "tape-pane-title";
     title.textContent = pane.title;
+    const group = document.createElement("button");
+    group.type = "button";
+    group.className = "tape-pane-group";
+    group.textContent = "Group";
+    group.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.openGroupMenu(paneId);
+    });
     const actions = document.createElement("div");
     actions.className = "tape-pane-actions";
     actions.append(
       iconButton("Maximize", "M5 5h6v2H7v4H5V5zm8 12h4v-4h2v6h-6v-2z", () => this.apply(toggleMaximized(focusInLayout(this.layout, paneId)))),
       iconButton("Close", "M7 7l10 10M17 7L7 17", () => this.closePane(paneId)),
     );
-    bar.append(kind, title, actions);
+    bar.append(kind, title, group, actions);
     bar.addEventListener("dblclick", () => this.apply(toggleMaximized(focusInLayout(this.layout, paneId))));
 
     const body = document.createElement("div");
@@ -495,7 +581,7 @@ export class TapeWorkspace {
     bottom.dataset.edge = "bottom";
     root.append(bar, body, right, bottom);
     this.world.append(root);
-    const shell = { root, body, title, bottom };
+    const shell = { root, body, title, group, bottom };
     this.shells.set(paneId, shell);
     void this.mount(pane, body);
     return shell;
@@ -770,6 +856,22 @@ export class TapeWorkspace {
       if (event.key === "Escape") this.closeDialog();
       return;
     }
+    if (this.spotlight.open) {
+      this.handleSpotlightKey(event);
+      return;
+    }
+    if (!this.groupMenu.hidden) {
+      if (event.key === "Escape" || matchShortcut(event) === "editGroup") {
+        event.preventDefault();
+        this.closeGroupMenu();
+      }
+      return;
+    }
+    if (matchShortcut(event) === "spotlight") {
+      event.preventDefault();
+      this.openSpotlight();
+      return;
+    }
     const editable = event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']");
     if (event.key === "Escape" && !editable) {
       if (this.overview) {
@@ -872,6 +974,15 @@ export class TapeWorkspace {
         this.group = !this.group;
         this.render();
         break;
+      case "editGroup":
+        this.openGroupMenu();
+        break;
+      case "groupNext":
+        this.cycleActiveGroup(1);
+        break;
+      case "groupPrev":
+        this.cycleActiveGroup(-1);
+        break;
       case "home":
         this.goHome();
         break;
@@ -880,6 +991,9 @@ export class TapeWorkspace {
         break;
       case "maximize":
         this.apply(toggleMaximized(this.layout));
+        break;
+      case "spotlight":
+        this.openSpotlight();
         break;
     }
   }
@@ -895,7 +1009,7 @@ export class TapeWorkspace {
   private handlePointerDown(event: PointerEvent): void {
     if (event.button !== 0 || !(event.target instanceof Element)) return;
     const target = event.target;
-    if (target.closest(".tape-controls, .tape-minimap, .tape-dialog")) return;
+    if (target.closest(".tape-controls, .tape-minimap, .tape-dialog, .tape-spotlight")) return;
     const resize = target.closest(".tape-resize");
     const shell = target.closest(".tape-pane, .tape-ghost");
     if (!(shell instanceof HTMLElement) && !(resize instanceof HTMLElement)) {
@@ -1038,6 +1152,247 @@ export class TapeWorkspace {
       pan: { ...this.overviewPan },
       moved: false,
     };
+  }
+
+  private openGroupMenu(paneId?: string): void {
+    const id = paneId ?? paneAt(this.layout);
+    if (!id) return;
+    this.groupMenuPaneId = id;
+    this.groupMenu.hidden = false;
+    this.groupMenuInput.value = "";
+    this.paintGroupMenu();
+    this.groupMenuInput.focus();
+  }
+
+  private closeGroupMenu(): void {
+    this.groupMenu.hidden = true;
+    this.groupMenuPaneId = null;
+  }
+
+  private assignMenuPane(groupId: string): void {
+    const paneId = this.groupMenuPaneId;
+    if (!paneId) return;
+    this.closeGroupMenu();
+    this.activeGroupId = groupId;
+    this.apply(withGroups(this.layout, assignPane(this.layout.groups, paneId, groupId)));
+  }
+
+  private ungroupMenuPane(): void {
+    const paneId = this.groupMenuPaneId;
+    if (!paneId) return;
+    this.closeGroupMenu();
+    this.apply(withGroups(this.layout, ungroupPane(this.layout.groups, paneId)));
+  }
+
+  private createMenuGroup(name: string): void {
+    const paneId = this.groupMenuPaneId;
+    if (!paneId) return;
+    const groups = addPaneToGroup(this.layout.groups, name, paneId);
+    const created = groupOf(groups, paneId);
+    this.closeGroupMenu();
+    if (created) this.activeGroupId = created.id;
+    this.apply(withGroups(this.layout, groups));
+  }
+
+  private showGroup(groupId: string | null): void {
+    if (!groupId) {
+      this.activeGroupId = null;
+      this.render();
+      return;
+    }
+    const group = this.layout.groups.find((item) => item.id === groupId);
+    if (!group) return;
+    if (this.activeGroupId !== groupId) {
+      this.activeGroupId = groupId;
+      const first = orderedMembers(this.layout, group)[0];
+      if (first) this.apply(focusInLayout(this.layout, first));
+      else this.render();
+      return;
+    }
+    this.cycleActiveGroup(1);
+  }
+
+  private cycleActiveGroup(delta: number): void {
+    const current = paneAt(this.layout);
+    const group = (current && groupOf(this.layout.groups, current)) || this.layout.groups.find((item) => item.id === this.activeGroupId);
+    if (!group) return;
+    const next = cycleMember(this.layout, group.id, current, delta);
+    this.activeGroupId = group.id;
+    if (!next || next === current) {
+      this.render();
+      return;
+    }
+    this.apply(focusInLayout(this.layout, next));
+  }
+
+  private paintGroupBar(): void {
+    this.groupBar.replaceChildren();
+    if (this.layout.groups.length === 0) {
+      this.groupBar.hidden = true;
+      return;
+    }
+    this.groupBar.hidden = false;
+    const all = document.createElement("button");
+    all.type = "button";
+    all.className = "tape-group-chip";
+    all.textContent = "All";
+    all.setAttribute("aria-pressed", String(this.activeGroupId === null));
+    all.addEventListener("click", () => this.showGroup(null));
+    this.groupBar.append(all);
+    for (const group of this.layout.groups) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "tape-group-chip";
+      chip.style.setProperty("--pane-group", group.color);
+      chip.setAttribute("aria-pressed", String(this.activeGroupId === group.id));
+      const dot = document.createElement("span");
+      dot.className = "tape-group-dot";
+      const count = document.createElement("span");
+      count.className = "tape-group-count";
+      count.textContent = String(group.paneIds.length);
+      chip.append(dot, document.createTextNode(group.name), count);
+      chip.addEventListener("click", () => this.showGroup(group.id));
+      this.groupBar.append(chip);
+    }
+  }
+
+  private paintGroupMenu(): void {
+    const paneId = this.groupMenuPaneId;
+    const pane = paneId ? this.panes.get(paneId) : undefined;
+    const membership = paneId ? groupOf(this.layout.groups, paneId) : undefined;
+    this.groupMenuTitle.textContent = pane ? `Group “${pane.title}”` : "Group this pane";
+    this.groupMenuRemove.hidden = !membership;
+    this.groupMenuRemove.textContent = membership ? `Remove from ${membership.name}` : "Remove";
+    this.groupMenuList.replaceChildren();
+    for (const group of this.layout.groups) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tape-group-choice";
+      button.style.setProperty("--pane-group", group.color);
+      button.setAttribute("aria-pressed", String(membership?.id === group.id));
+      button.textContent = `${group.name} · ${group.paneIds.length}`;
+      button.addEventListener("click", () => this.assignMenuPane(group.id));
+      this.groupMenuList.append(button);
+    }
+  }
+
+  private openSpotlight(): void {
+    if (this.spotlight.open) {
+      this.spotlightInput.focus();
+      return;
+    }
+    this.closeGroupMenu();
+    if (this.dialog.open) this.closeDialog();
+    this.spotlightIndex = 0;
+    this.spotlightInput.value = "";
+    this.renderSpotlight();
+    this.spotlight.showModal();
+    this.spotlightInput.focus();
+    this.spotlightInput.select();
+  }
+
+  private closeSpotlight(): void {
+    if (this.spotlight.open) this.spotlight.close();
+    this.stage.focus({ preventScroll: true });
+  }
+
+  private handleSpotlightKey(event: KeyboardEvent): void {
+    if (matchShortcut(event) === "spotlight" || event.key === "Escape") {
+      event.preventDefault();
+      this.closeSpotlight();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      this.moveSpotlight(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      this.chooseSpotlight();
+    }
+  }
+
+  private moveSpotlight(delta: number): void {
+    if (this.spotlightHits.length === 0) return;
+    this.spotlightIndex = Math.min(this.spotlightHits.length - 1, Math.max(0, this.spotlightIndex + delta));
+    this.paintSpotlightSelection();
+  }
+
+  private chooseSpotlight(): void {
+    const hit = this.spotlightHits[this.spotlightIndex];
+    if (!hit) return;
+    this.closeSpotlight();
+    this.focusPane(hit.paneId);
+  }
+
+  private renderSpotlight(): void {
+    const entries = paneIds(this.layout).map((id) => {
+      const pane = this.panes.get(id);
+      return {
+        paneId: id,
+        title: pane?.title ?? id,
+        surfaceKind: pane?.surfaceKind ?? "pane",
+        keywords: groupOf(this.layout.groups, id)?.name ?? "",
+      };
+    });
+    this.spotlightHits = searchPanes(entries, this.spotlightInput.value, paneAt(this.layout));
+    if (this.spotlightIndex > this.spotlightHits.length - 1) this.spotlightIndex = 0;
+    this.spotlightList.replaceChildren();
+    this.spotlightHits.forEach((hit, index) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "tape-spotlight-option";
+      option.id = `tape-spot-${index}`;
+      option.setAttribute("role", "option");
+      const kind = document.createElement("span");
+      kind.className = "tape-spotlight-kind";
+      kind.textContent = hit.surfaceKind;
+      const title = document.createElement("span");
+      title.className = "tape-spotlight-title";
+      title.append(markedText(hit.title, hit.titleMarks));
+      const where = document.createElement("span");
+      where.className = "tape-spotlight-where";
+      const membership = groupOf(this.layout.groups, hit.paneId);
+      where.textContent = [membership?.name, this.placeLabel(hit.paneId)].filter(Boolean).join(" · ");
+      option.append(kind, title, where);
+      option.addEventListener("mouseenter", () => {
+        this.spotlightIndex = index;
+        this.paintSpotlightSelection();
+      });
+      option.addEventListener("click", () => {
+        this.spotlightIndex = index;
+        this.chooseSpotlight();
+      });
+      this.spotlightList.append(option);
+    });
+    const empty = this.spotlightHits.length === 0;
+    this.spotlightEmpty.hidden = !empty;
+    this.spotlightList.hidden = empty;
+    this.paintSpotlightSelection();
+  }
+
+  private paintSpotlightSelection(): void {
+    const options = [...this.spotlightList.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+    for (const [index, option] of options.entries()) {
+      const selected = index === this.spotlightIndex;
+      option.setAttribute("aria-selected", String(selected));
+      if (!selected) continue;
+      option.scrollIntoView({ block: "nearest" });
+      this.spotlightInput.setAttribute("aria-activedescendant", option.id);
+    }
+    if (options.length === 0) this.spotlightInput.removeAttribute("aria-activedescendant");
+  }
+
+  private placeLabel(paneId: string): string {
+    const cursor = findCursor(this.layout, paneId);
+    if (!cursor) return "";
+    const plane = this.layout.planes.find((item) => item.index === cursor.plane);
+    const columns = plane ? [...plane.columns].sort((left, right) => left.index - right.index) : [];
+    const ordinal = Math.max(1, columns.findIndex((column) => column.index === cursor.column) + 1);
+    const depth = columns.find((column) => column.index === cursor.column)?.cells.length ?? 1;
+    const column = `Column ${ordinal}`;
+    return depth > 1 ? `${column} · row ${cursor.row + 1}` : column;
   }
 
   private openDialog(): void {
@@ -1250,8 +1605,117 @@ function mark(): HTMLElement {
 function hint(mac: boolean): HTMLElement {
   const node = document.createElement("p");
   node.className = "tape-hint";
-  node.textContent = mac ? "⌥ arrows move · ⌥O overview" : "Alt+arrows move · Alt+O overview";
+  node.textContent = mac ? "⌥ arrows move · ⌘K search" : "Alt+arrows move · Ctrl+K search";
   return node;
+}
+
+function buildGroupMenu(
+  onRemove: () => void,
+  onCreate: (name: string) => void,
+): {
+  root: HTMLElement;
+  title: HTMLElement;
+  list: HTMLElement;
+  remove: HTMLButtonElement;
+  input: HTMLInputElement;
+} {
+  const root = document.createElement("div");
+  root.className = "tape-group-menu";
+  root.hidden = true;
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-label", "Group this pane");
+  const title = document.createElement("p");
+  title.className = "tape-group-menu-title";
+  const list = document.createElement("div");
+  list.className = "tape-group-menu-list";
+  const form = document.createElement("form");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.name = "group";
+  input.placeholder = "New group";
+  input.setAttribute("aria-label", "New group name");
+  const add = document.createElement("button");
+  add.type = "submit";
+  add.textContent = "Add";
+  form.append(input, add);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = input.value.trim();
+    if (!name) return;
+    onCreate(name);
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "tape-group-remove";
+  remove.hidden = true;
+  remove.addEventListener("click", onRemove);
+  root.append(title, list, form, remove);
+  return { root, title, list, remove, input };
+}
+
+function markedText(title: string, marks: readonly number[]): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const marked = new Set(marks);
+  let buffer = "";
+  let marking = false;
+  const flush = (mark: boolean) => {
+    if (!buffer) return;
+    if (mark) {
+      const node = document.createElement("mark");
+      node.textContent = buffer;
+      fragment.append(node);
+    } else {
+      fragment.append(document.createTextNode(buffer));
+    }
+    buffer = "";
+  };
+  for (let index = 0; index < title.length; index += 1) {
+    const on = marked.has(index);
+    if (on !== marking) {
+      flush(marking);
+      marking = on;
+    }
+    buffer += title[index] ?? "";
+  }
+  flush(marking);
+  return fragment;
+}
+
+interface SpotlightShell {
+  dialog: HTMLDialogElement;
+  form: HTMLFormElement;
+  input: HTMLInputElement;
+  list: HTMLUListElement;
+  empty: HTMLParagraphElement;
+}
+
+function buildSpotlight(): SpotlightShell {
+  const dialog = document.createElement("dialog");
+  dialog.className = "tape-spotlight";
+  const form = document.createElement("form");
+  form.className = "tape-spotlight-card";
+  form.setAttribute("role", "search");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.name = "spotlight";
+  input.placeholder = "Search panes";
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-expanded", "true");
+  input.setAttribute("aria-controls", "tape-spotlight-list");
+  input.setAttribute("aria-label", "Search panes");
+  const list = document.createElement("ul");
+  list.id = "tape-spotlight-list";
+  list.className = "tape-spotlight-list";
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Panes");
+  const empty = document.createElement("p");
+  empty.className = "tape-spotlight-empty";
+  empty.textContent = "No matching panes";
+  empty.hidden = true;
+  form.append(input, list, empty);
+  dialog.append(form);
+  return { dialog, form, input, list, empty };
 }
 
 function buildDialog(

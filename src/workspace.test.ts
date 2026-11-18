@@ -364,3 +364,76 @@ test("wheel zoom is ignored until overview is open", async () => {
   expect(zoom.defaultPrevented).toBe(true);
   expect(root().querySelector(".tape-world")?.getAttribute("style")).not.toBe(before);
 });
+
+test("panes join a named group and the chip walks through them", async () => {
+  const workspace = create({
+    storageKey: "tape-test-groups",
+    panes: [pane("guide"), pane("clock"), pane("ledger")],
+  });
+  await flush();
+  button("Group").click();
+  const input = root().querySelector(".tape-group-menu input");
+  if (!(input instanceof HTMLInputElement)) throw new Error("group menu has no name field");
+  input.value = "Studio";
+  input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  expect(workspace.getLayout().groups.map((group) => group.paneIds)).toEqual([["guide"]]);
+  expect(root().querySelector('[data-pane-id="guide"] .tape-pane-group')?.textContent).toBe("Studio");
+
+  button("Focus right").click();
+  button("Group").click();
+  const choice = [...root().querySelectorAll(".tape-group-choice")].find((item) => item.textContent?.includes("Studio"));
+  if (!(choice instanceof HTMLButtonElement)) throw new Error("Studio is not listed");
+  choice.click();
+  expect(workspace.getLayout().groups[0]?.paneIds).toEqual(["guide", "clock"]);
+
+  const chip = [...root().querySelectorAll(".tape-group-chip")].find((item) => item.textContent?.includes("Studio"));
+  if (!(chip instanceof HTMLButtonElement)) throw new Error("Studio chip is missing");
+  chip.click();
+  expect(root().classList.contains("is-grouped")).toBe(true);
+  expect(root().querySelector('[data-pane-id="guide"]')?.classList.contains("in-group")).toBe(true);
+  expect(root().querySelector('[data-pane-id="ledger"]')?.classList.contains("in-group")).toBe(false);
+  expect(workspace.getLayout().cursor.column).toBe(0);
+  chip.click();
+  expect(workspace.getLayout().cursor.column).toBe(1);
+
+  press("]", { altKey: true });
+  expect(workspace.getLayout().cursor.column).toBe(0);
+  const saved = JSON.parse(localStorage.getItem("tape-test-groups") ?? "{}") as { layout?: { groups?: { name: string }[] } };
+  expect(saved.layout?.groups?.map((group) => group.name)).toEqual(["Studio"]);
+});
+
+test("spotlight filters panes and jumps to the chosen one", async () => {
+  const workspace = create({
+    paneLink: true,
+    panes: [pane("guide"), pane("clock"), pane("ledger")],
+  });
+  await flush();
+  press("k", { metaKey: true, code: "KeyK" });
+  const dialog = root().querySelector(".tape-spotlight");
+  expect(dialog instanceof HTMLDialogElement && dialog.open).toBe(true);
+  press("ArrowDown");
+  expect(root().querySelector("#tape-spot-1")?.getAttribute("aria-selected")).toBe("true");
+
+  const input = root().querySelector(".tape-spotlight input");
+  if (!(input instanceof HTMLInputElement)) throw new Error("spotlight has no field");
+  input.value = "led";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  const options = [...root().querySelectorAll(".tape-spotlight-option")];
+  expect(options).toHaveLength(1);
+  expect(options[0]?.textContent).toContain("Ledger");
+  expect(options[0]?.textContent).toContain("Column 3");
+  expect(options[0]?.querySelector("mark")?.textContent).toBe("Led");
+  press("Enter");
+  expect(dialog instanceof HTMLDialogElement && dialog.open).toBe(false);
+  expect(workspace.getLayout().cursor).toEqual({ plane: 0, column: 2, row: 0 });
+  expect(location.search).toBe("?pane=ledger");
+
+  button("Search").click();
+  const again = root().querySelector(".tape-spotlight input");
+  if (!(again instanceof HTMLInputElement)) throw new Error("spotlight did not reopen");
+  again.value = "zzzz";
+  again.dispatchEvent(new Event("input", { bubbles: true }));
+  expect(root().querySelector(".tape-spotlight-empty")?.hasAttribute("hidden")).toBe(false);
+  press("Escape");
+  expect(root().querySelector(".tape-spotlight") instanceof HTMLDialogElement && root().querySelector("dialog.tape-spotlight")?.hasAttribute("open")).toBe(false);
+});

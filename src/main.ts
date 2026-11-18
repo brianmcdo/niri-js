@@ -1,5 +1,5 @@
 import { TapeWorkspace } from "./workspace.ts";
-import { sampleColumns, samplePanes } from "./samples.ts";
+import { sampleColumns, sampleGroups, samplePanes } from "./samples.ts";
 
 const root = document.querySelector("#app");
 if (!(root instanceof HTMLElement)) {
@@ -11,6 +11,7 @@ new TapeWorkspace(root, {
   storageKey: "scrolling-tape-layout",
   panes: samplePanes(),
   columns: sampleColumns,
+  groups: sampleGroups,
   liveContent: true,
   runway: 1,
   focusAnchor: "center",
