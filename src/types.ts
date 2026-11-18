@@ -48,12 +48,36 @@ export interface PaneContext {
   emit: (type: string, detail?: unknown) => void;
   /** Subscribe to messages. The returned function removes the listener. */
   on: (type: string, listener: (event: PaneBusEvent) => void) => () => void;
+  /** Ask mounted panes to handle a command. Resolves with one result per handler. */
+  command: (type: string, detail?: unknown, target?: PaneCommandTarget) => Promise<PaneCommandResult[]>;
+  /** Handle a command. The return value is the reply. The returned function removes the handler. */
+  handle: (type: string, handler: (event: PaneBusEvent) => unknown | Promise<unknown>) => () => void;
+  /** Ask the workspace to focus, close, or open a pane. */
+  workspace: {
+    focus: (paneId: string) => void;
+    close: (paneId: string) => void;
+    open: (pane: PaneDefinition) => string;
+  };
 }
 
 export interface PaneBusEvent {
   type: string;
   detail: unknown;
   sourceId: string;
+}
+
+/** Who should answer a command. Omit both fields to reach every pane except the sender. */
+export interface PaneCommandTarget {
+  paneId?: string;
+  surfaceKind?: string;
+  /** How long each handler may take. Defaults to 5 seconds. */
+  timeoutMs?: number;
+}
+
+export interface PaneCommandResult {
+  paneId: string;
+  value?: unknown;
+  error?: string;
 }
 
 export interface PaneHandle {

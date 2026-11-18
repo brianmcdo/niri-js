@@ -7,6 +7,8 @@ export type {
   Cursor,
   Layout,
   PaneBusEvent,
+  PaneCommandResult,
+  PaneCommandTarget,
   PaneContext,
   PaneDefinition,
   PaneFramework,

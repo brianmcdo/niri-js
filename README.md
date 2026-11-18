@@ -99,6 +99,21 @@ export function mount(host, context) {
 }
 ```
 
-`context` includes `focused`, `visible`, `maximized`, `runtimeState` (`live`, `frozen`, or `hidden`), and `presentationMode`. It also has `emit(type, detail)` and `on(type, listener)`, a small bus every pane shares. Call `on` from `mount` and use the function it returns to unsubscribe. Custom elements also receive a `tape-pane-state` event.
+`context` includes `focused`, `visible`, `maximized`, `runtimeState` (`live`, `frozen`, or `hidden`), and `presentationMode`. It also has `emit(type, detail)` and `on(type, listener)`, a small bus every pane shares. Call `on` from `mount` and use the function it returns to unsubscribe. Custom elements also receive a `tape-pane-state` event. React, Vue, and Svelte receive the same context as `tape`.
+
+A pane can ask other panes to handle a command and read what they return. Subscribe once from `mount` or `connectedCallback`:
+
+```ts
+context.handle("sum", (event) => {
+  const detail = event.detail as { left: number; right: number };
+  return detail.left + detail.right;
+});
+
+const [result] = await context.command("sum", { left: 2, right: 3 }, { paneId: "ledger" });
+```
+
+`command(type, detail, target)` waits for each matching handler. `{ paneId }` addresses that pane. `{ surfaceKind }` addresses every pane of that kind. Setting both addresses that pane when its kind matches. With no target, the command reaches every mounted pane except the sender. Pass your own pane id to include it. Each handler has 5 seconds (`timeoutMs` on the target). The call resolves with one result per handler: `{ paneId, value }` when it returns, or `{ paneId, error }` when it throws or times out.
+
+`context.workspace` can `focus(paneId)`, `close(paneId)`, or `open(pane)`. `open` returns the pane id the workspace used. `focus` and `close` leave the strip alone when that pane is not on it.
 
 The arrangement is saved in `localStorage` under the `storageKey` you pass (`niri-js` in the demo), including named workspaces and recently closed panes. The header chip switches workspaces. **Export** downloads the current strip as JSON, and **Import** replaces that strip. `Reset` restores the original panes in the current workspace. A `?pane=` query opens on that pane.

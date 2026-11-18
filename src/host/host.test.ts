@@ -18,6 +18,13 @@ function context(overrides: Partial<PaneContext> = {}): PaneContext {
     props: {},
     emit() {},
     on: () => () => {},
+    command: async () => [],
+    handle: () => () => {},
+    workspace: {
+      focus() {},
+      close() {},
+      open: () => "pane",
+    },
     ...overrides,
   };
 }

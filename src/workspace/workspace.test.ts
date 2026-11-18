@@ -502,6 +502,123 @@ test("focus history returns to the pane that was left", async () => {
   expect(workspace.getLayout().cursor.column).toBe(2);
 });
 
+test("a pane can command another and read the reply", async () => {
+  let reply: unknown;
+  create({
+    panes: [
+      {
+        paneId: "sender",
+        title: "Sender",
+        surfaceKind: "sender",
+        source: {
+          kind: "mount",
+          mount(host, context) {
+            const button = document.createElement("button");
+            button.textContent = "Ask";
+            button.addEventListener("click", () => {
+              void context.command("sum", { left: 2, right: 3 }, { paneId: "listener" }).then((results) => {
+                reply = results[0]?.value;
+                host.dataset.reply = String(results[0]?.value);
+              });
+            });
+            host.append(button);
+          },
+        },
+      },
+      {
+        paneId: "listener",
+        title: "Listener",
+        surfaceKind: "ledger",
+        source: {
+          kind: "mount",
+          mount(_host, context) {
+            context.handle("sum", (event) => {
+              const detail = event.detail as { left?: number; right?: number };
+              return (detail.left ?? 0) + (detail.right ?? 0);
+            });
+          },
+        },
+      },
+    ],
+  });
+  await flush();
+  const ask = [...root().querySelectorAll("button")].find((item) => item.textContent === "Ask");
+  if (!(ask instanceof HTMLButtonElement)) throw new Error("Ask was not mounted");
+  ask.click();
+  await flush();
+  expect(reply).toBe(5);
+  expect(root().querySelector("[data-pane-id='sender'] .tape-pane-body")?.getAttribute("data-reply")).toBe("5");
+});
+
+test("a pane can focus, open, and close through the workspace", async () => {
+  let actions: { focus: (paneId: string) => void; close: (paneId: string) => void; open: (pane: PaneDefinition) => string } | undefined;
+  const workspace = create({
+    panes: [
+      {
+        paneId: "sender",
+        title: "Sender",
+        surfaceKind: "sender",
+        source: {
+          kind: "mount",
+          mount(_host, context) {
+            actions = context.workspace;
+          },
+        },
+      },
+      pane("clock"),
+    ],
+  });
+  await flush();
+  if (!actions) throw new Error("workspace actions were not mounted");
+  actions.focus("clock");
+  expect(workspace.getLayout().cursor.column).toBe(1);
+  const opened = actions.open(pane("notes"));
+  await flush();
+  expect(opened).toBe("notes");
+  expect(root().querySelector('[data-pane-id="notes"]')).not.toBeNull();
+  actions.close("clock");
+  await flush();
+  expect(root().querySelector('[data-pane-id="clock"]')).toBeNull();
+  actions.focus("missing");
+  actions.close("missing");
+  expect(workspace.getLayout().cursor.column).toBe(2);
+});
+
+test("closing a pane drops its command handler", async () => {
+  let command: ((type: string, detail?: unknown, target?: { paneId?: string }) => Promise<{ paneId: string; value?: unknown }[]>) | undefined;
+  const workspace = create({
+    panes: [
+      {
+        paneId: "sender",
+        title: "Sender",
+        surfaceKind: "sender",
+        source: {
+          kind: "mount",
+          mount(_host, context) {
+            command = context.command;
+          },
+        },
+      },
+      {
+        paneId: "listener",
+        title: "Listener",
+        surfaceKind: "ledger",
+        source: {
+          kind: "mount",
+          mount(_host, context) {
+            context.handle("ping", () => "pong");
+          },
+        },
+      },
+    ],
+  });
+  await flush();
+  if (!command) throw new Error("command was not mounted");
+  expect(await command("ping", undefined, { paneId: "listener" })).toEqual([{ paneId: "listener", value: "pong" }]);
+  workspace.closePane("listener");
+  expect(await command("ping", undefined, { paneId: "listener" })).toEqual([]);
+});
+
 test("panes can send each other a message", async () => {
   const heard: string[] = [];
   create({

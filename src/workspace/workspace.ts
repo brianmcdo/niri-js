@@ -54,7 +54,7 @@ import {
   withGroups,
   type PaneGroup,
 } from "../layout/groups.ts";
-import type { Box, Cursor, Layout, PaneBusEvent, PaneContext, PaneDefinition, PaneHandle, PaneSource, Scene } from "../types.ts";
+import type { Box, Cursor, Layout, PaneContext, PaneDefinition, PaneHandle, PaneSource, Scene } from "../types.ts";
 
 export interface TapeWorkspaceOptions {
   workspaceId?: string;
@@ -837,7 +837,15 @@ export class TapeWorkspace {
       presentationMode: this.compact ? "compact" : this.overview ? "overview" : "normal",
       props,
       emit: (type, detail) => this.bus.emit(pane.paneId, type, detail),
-      on: (type, listener) => this.listen(pane.paneId, type, listener),
+      on: (type, listener) => this.listen(pane.paneId, this.bus.on(type, listener)),
+      command: (type, detail, target) => this.bus.command(pane.paneId, type, detail, target),
+      handle: (type, handler) =>
+        this.listen(pane.paneId, this.bus.handle(pane.paneId, pane.surfaceKind, type, handler)),
+      workspace: {
+        focus: (paneId) => this.focusPane(paneId),
+        close: (paneId) => this.closePane(paneId),
+        open: (definition) => this.openPane(definition),
+      },
     };
   }
 
@@ -1546,8 +1554,7 @@ export class TapeWorkspace {
     this.suppressHistory = false;
   }
 
-  private listen(paneId: string, type: string, listener: (event: PaneBusEvent) => void): () => void {
-    const stop = this.bus.on(type, listener);
+  private listen(paneId: string, stop: () => void): () => void {
     const stops = this.busStops.get(paneId) ?? new Set();
     stops.add(stop);
     this.busStops.set(paneId, stops);
