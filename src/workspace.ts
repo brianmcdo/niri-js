@@ -353,7 +353,7 @@ export class TapeWorkspace {
 
   private useInitial(): void {
     this.panes.clear();
-    for (const pane of this.initialPanes) this.panes.set(pane.paneId, structuredClone(pane));
+    for (const pane of this.initialPanes) this.panes.set(pane.paneId, copyPane(pane));
     this.layout = createLayout(
       this.options.workspaceId ?? "tape",
       this.initialColumns,
@@ -1129,6 +1129,28 @@ function readCursor(node: HTMLElement): Cursor {
   };
 }
 
+/** Copy a pane without dropping a live component function. */
+function copyPane(pane: PaneDefinition): PaneDefinition {
+  switch (pane.source.kind) {
+    case "html":
+    case "element":
+    case "module":
+      return structuredClone(pane);
+    case "mount":
+      return { ...pane, source: { ...pane.source } };
+    case "react":
+    case "vue":
+    case "svelte":
+      return {
+        ...pane,
+        source: {
+          ...pane.source,
+          props: pane.source.props ? { ...pane.source.props } : undefined,
+        },
+      };
+  }
+}
+
 function uniqueId(base: string, panes: Map<string, PaneDefinition>): string {
   const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "pane";
   if (!panes.has(slug)) return slug;
@@ -1252,7 +1274,7 @@ function buildDialog(
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = sample.title;
-    button.addEventListener("click", () => onSample({ ...structuredClone(sample), paneId: sample.surfaceKind }));
+    button.addEventListener("click", () => onSample({ ...copyPane(sample), paneId: sample.surfaceKind }));
     sampleRow.append(button);
   }
   const title = field("Title", "text", "title", "Notes");

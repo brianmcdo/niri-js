@@ -5,15 +5,21 @@ import {
   closePane,
   createLayout,
   cursorBox,
+  defaultColumnWidth,
   focusBy,
   focusEdge,
+  focusHome,
   insertAsSplit,
   measure,
   moveColumn,
   movePane,
   openPane,
   paneIds,
+  relocatePane,
+  removeBlank,
   resizeColumn,
+  resizeSplit,
+  sceneBounds,
   splitBlank,
   splitPlane,
   toggleMaximized,
@@ -136,10 +142,53 @@ describe("layout", () => {
     expect(split.planes.find((plane) => plane.index === 1)!.columns[0]!.cells[0]!.paneId).toBeNull();
   });
 
-  test("resize changes one column", () => {
+  test("resize changes one column and clamps to the column limits", () => {
     const resized = resizeColumn(tape(), tape().cursor, 900);
     expect(resized.planes[0]!.columns.find((column) => column.index === 0)!.widthPx).toBe(900);
     expect(resized.planes[0]!.columns.find((column) => column.index === 1)!.widthPx).toBe(500);
+    expect(resizeColumn(tape(), tape().cursor, 10).planes[0]!.columns[0]!.widthPx).toBe(280);
+    expect(defaultColumnWidth(100)).toBe(400);
+    expect(defaultColumnWidth(1000)).toBe(560);
+    expect(defaultColumnWidth(2000)).toBe(680);
+  });
+
+  test("a vertical split shares the weight and a blank row can be removed", () => {
+    const stacked = splitBlank(tape(), "down", 500);
+    const column = stacked.planes[0]!.columns.find((item) => item.index === 0)!;
+    expect(column.cells.map((cell) => cell.paneId)).toEqual(["a", null]);
+    const resized = resizeSplit(stacked, { plane: 0, column: 0, row: 0 }, 0.4);
+    const weights = resized.planes[0]!.columns.find((item) => item.index === 0)!.cells.map((cell) => cell.weight);
+    expect(weights[0]).toBeCloseTo(1.4);
+    expect(weights[1]).toBeCloseTo(0.6);
+    const clamped = resizeSplit(stacked, { plane: 0, column: 0, row: 0 }, 10);
+    const clampedWeights = clamped.planes[0]!.columns.find((item) => item.index === 0)!.cells.map((cell) => cell.weight);
+    expect(clampedWeights[0]).toBeCloseTo(1.85);
+    expect(clampedWeights[1]).toBeCloseTo(0.15);
+    const removed = removeBlank({ ...stacked, cursor: { plane: 0, column: 0, row: 0 } }, "down");
+    expect(removed.planes[0]!.columns.find((item) => item.index === 0)!.cells).toHaveLength(1);
+    expect(removeBlank(tape(), "down")).toEqual(tape());
+  });
+
+  test("dropping a pane swaps with an occupied cell and adopts a free index", () => {
+    const swapped = relocatePane(tape(), "a", { plane: 0, column: 2, row: 0 });
+    expect(swapped.planes[0]!.columns.find((column) => column.index === 2)!.cells[0]!.paneId).toBe("a");
+    expect(swapped.planes[0]!.columns.find((column) => column.index === 0)!.cells[0]!.paneId).toBe("d");
+    expect(swapped.cursor).toEqual({ plane: 0, column: 2, row: 0 });
+    const adopted = relocatePane(tape(), "a", { plane: 0, column: 4, row: 0 });
+    expect(adopted.planes[0]!.columns.find((column) => column.index === 4)!.cells[0]!.paneId).toBe("a");
+    expect(adopted.planes[0]!.columns.find((column) => column.index === 0)).toBeUndefined();
+  });
+
+  test("closing an unfocused pane keeps the cursor, and home clears maximize", () => {
+    const closed = closePane(tape(), "d");
+    expect(closed.cursor).toEqual({ plane: 0, column: 0, row: 0 });
+    expect(paneIds(closed)).not.toContain("d");
+    const away = toggleMaximized(focusBy(tape(), 1, 0, 1));
+    const home = focusHome(away);
+    expect(home.cursor).toEqual({ plane: 0, column: 0, row: 0 });
+    expect(home.maximizedPaneId).toBeNull();
+    const empty = createLayout("tape", [], 500);
+    expect(focusHome(empty)).toBe(empty);
   });
 
   test("home and edge focus", () => {
@@ -162,6 +211,9 @@ describe("layout", () => {
     const camera = cameraFor(box, { width: 1000, height: 800 }, "center");
     expect(camera.x + 500).toBeCloseTo(box.x + box.width / 2);
     expect(camera.y + 400).toBeCloseTo(box.y + box.height / 2);
+    const bounds = sceneBounds(scene, options.padding);
+    expect(bounds.x).toBeLessThanOrEqual(0);
+    expect(bounds.width).toBeGreaterThan(scene.boxes.at(-1)!.x);
   });
 
   test("rejects a duplicate pane id", () => {
